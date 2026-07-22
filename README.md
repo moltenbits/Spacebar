@@ -19,6 +19,9 @@ alleviate that for my own productivity.
 - [Usage](#usage)
   - [GUI (Task Switcher)](#gui-task-switcher)
   - [Moving Windows Between Spaces](#moving-windows-between-spaces)
+  - [Moving Spaces Between Displays](#moving-spaces-between-displays)
+  - [Resizing Windows](#resizing-windows)
+  - [Workspaces](#workspaces)
   - [CLI](#cli)
 - [Requirements](#requirements)
 - [How It Works](#how-it-works)
@@ -63,13 +66,20 @@ workflows, the more balls it felt like one was forced to juggle until all produc
 - **Space-aware** — groups windows by Space with MRU (most-recently-used) ordering
 - **Cross-space activation** — switches to any window on any Space with native animation
 - **Move windows between Spaces** — Cmd+M to mark a window, navigate to the target space, release to move (no SIP required)
-- **Keyboard-driven** — Cmd+Tab to cycle, Cmd+\` to go back
+- **Move Spaces between displays** — Cmd+Shift+M to mark a Space, arrow to the target display, release to move
+- **Window resizing** — Cmd+Shift+D opens a grid overlay for the focused window: drag cells to resize, or apply
+  configurable presets (pressing a preset again cycles it across screens)
+- **Keyboard-driven** — Cmd+Tab to cycle, Cmd+\` to go back; all shortcuts customizable in Settings
 - **Window management** — Cmd+W to close a window, Cmd+Q to quit an app
 - **Create and close spaces** - create new spaces (Cmd+N) or close existing ones (Cmd+Shift+W)
 - **Custom space names** — select a Space and press Cmd+R to rename inline (names are local to Spaceballs; macOS does not expose Space names to apps)
 - **Multi-display** — show the panel on the active display, primary display, or per display
-- **Default spaces** - define default spaces that can be automatically created (Cmd+D)
+- **Workspaces** — define named Spaces with app launchers, then restore them all in one shot (`spaceballs workspace restore`)
+- **Window layout memory** — optionally remember and restore window positions per Space and display arrangement
+- **Cursor warp** — optionally warp the pointer onto the window you activate
+- **App exclusions** — hide chosen apps from the switcher
 - **Settings export/import** — backup and restore all settings via JSON (CLI or GUI)
+- **Opt-in diagnostics** — local troubleshooting log with optional window-title redaction
 - **CLI** - All features available from a `spaceballs` CLI command
 
 ## Installation
@@ -99,20 +109,23 @@ Once running, the app lives in the background (no Dock icon). Keyboard shortcuts
 |---|---|
 | Cmd+Tab | Show panel / move selection down |
 | Cmd+\` | Move selection up |
-| Cmd+↓ / Cmd+↑ | Jump to next / previous space (with Cmd held) |
-| Cmd+← / Cmd+→ | Cycle between displays |
-| Release Cmd | Activate selected window or space |
-| Escape | Dismiss panel |
-| Cmd+M | Enter move mode (mark selected window for moving) |
+| Cmd+↓ / Cmd+↑ (or bare ↓ / ↑) | Jump to next / previous space |
+| Cmd+← / Cmd+→ | Cycle between displays (move-mode-aware) |
+| Release Cmd (or Cmd+Enter) | Activate selected window or space |
+| Escape | Dismiss panel / cancel current mode |
+| Cmd+M | Enter move mode (mark selected window for moving between Spaces) |
+| Cmd+Shift+M | Enter space-move mode (mark selected Space for moving between displays) |
 | Cmd+W | Close selected window |
 | Cmd+Shift+W | Close selected space |
 | Cmd+Q | Quit selected app |
 | Cmd+R | Rename selected space (Enter to save, Escape to cancel) |
 | Cmd+N | Create a new space |
-| Cmd+D | Create all missing default spaces |
 | Cmd+S | Cycle sort order (MRU / Ordinal / Name) |
+| Cmd+Shift+D | Toggle the window resize grid (works globally, no panel needed) |
 | Cmd+, | Open Settings |
 | Type | Filter windows by app name or title |
+
+All shortcut keys can be rebound in Settings.
 
 ### Moving Windows Between Spaces
 
@@ -133,24 +146,67 @@ spaceballs move "Safari" "Desktop 3"    # Move by window title and space name
 spaceballs move 12345 67890             # Move by window ID and space ID
 ```
 
+### Moving Spaces Between Displays
+
+An entire Space — with all its windows — can be relocated to another display, again via simulated Mission Control
+drag (no SIP required). If the Space is the display's only desktop or is currently active, Spaceballs handles the
+prerequisites automatically (creates a sibling Space / switches away first).
+
+**How to use:**
+
+1. **Cmd+Tab** to open Spaceballs and select the Space (or any window in it)
+2. **Cmd+Shift+M** to enter space-move mode
+3. **Cmd+← / Cmd+→** to cycle the marked Space between displays
+4. **Release Cmd** to execute the move, or **Escape** to cancel
+
+From the CLI:
+
+```bash
+spaceballs move-space "Work" 2          # Space name → 2nd display
+spaceballs move-space "Desktop 3" DELL  # "Desktop N" → display name substring
+```
+
+### Resizing Windows
+
+**Cmd+Shift+D** (from anywhere — the switcher panel does not need to be open) overlays a resize grid on the focused
+window's screen. Drag across grid cells to snap the window to that region, or apply one of the configurable presets —
+pressing the same preset again cycles the window across screens. Grid dimensions, margins, and presets are all
+configurable in Settings.
+
+### Workspaces
+
+Workspaces let you define named Spaces together with the apps that should launch in them. Restoring recreates any
+missing Spaces and launches the configured apps in the right place:
+
+```bash
+spaceballs workspace list               # Show configured workspaces and their launchers
+spaceballs workspace restore            # Create missing spaces and launch configured apps
+```
+
+Workspaces are configured in Settings and included in settings export/import.
+
 ### CLI
 
 ```bash
-spaceballs                          # Show help
-spaceballs list                     # List all Spaces and windows (text output)
-spaceballs list --json              # JSON output
-spaceballs window <window-id>       # Activate a window by ID
-spaceballs move <window> <space>    # Move a window to another Space (by ID or name)
-spaceballs switch <space>           # Switch to a Space by ID or name
-spaceballs create                   # Create a new unnamed space
-spaceballs create "Work"            # Create a space and name it
-spaceballs create 3                 # Create 3 unnamed spaces
-spaceballs create --defaults        # Create all missing default spaces
-spaceballs close <space>            # Close a Space by ID or name
-spaceballs rename <space-id> [name] # Set or clear a custom Space name
-spaceballs settings export [path]   # Export settings to JSON (stdout if no path)
-spaceballs settings import <path>   # Import settings from JSON
-spaceballs --version                # Version
+spaceballs                            # Show help
+spaceballs list                       # List all Spaces and windows (text output)
+spaceballs list --json                # JSON output
+spaceballs window <window-id>         # Activate a window by ID
+spaceballs move <window> <space>      # Move a window to another Space (by ID or name)
+spaceballs move-space <space> <display> # Move an entire Space to another display
+spaceballs switch <space>             # Switch to a Space by ID or name
+spaceballs create                     # Create a new unnamed space
+spaceballs create "Work"              # Create a space and name it
+spaceballs create 3                   # Create 3 unnamed spaces
+spaceballs create --defaults          # Create missing spaces from your default space names list
+spaceballs close <space>              # Close a Space by ID or name
+spaceballs rename <space-id> [name]   # Set or clear a custom Space name
+spaceballs workspace list             # Show configured workspaces and their launchers
+spaceballs workspace restore          # Restore workspaces: create spaces and launch apps
+spaceballs settings export [path]     # Export settings to JSON (stdout if no path)
+spaceballs settings import <path>     # Import settings from JSON
+spaceballs diagnostics [status]       # Show/enable/disable opt-in diagnostic logging
+spaceballs --version                  # Version
 ```
 
 ## Requirements
@@ -181,6 +237,7 @@ Spaceballs uses private Apple frameworks accessed via `@_silgen_name`:
 - `CoreDockSendNotification("com.apple.expose.awake")` — open/close Mission Control programmatically
 - Dock AX hierarchy navigation (`mc` → `mc.display` → `mc.spaces` → `mc.spaces.list`) — locate space buttons for switching
 - `mc.windows` AX group — window thumbnails in Mission Control, used for drag simulation to move windows between Spaces
+- Space tiles in `mc.spaces.list` — dragged between display bars to move an entire Space to another display
 - `AXPress` on the `mc.spaces.add` button — create new Spaces
 - `AXRemoveDesktop` action on space buttons — close Spaces
 
