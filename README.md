@@ -1,16 +1,18 @@
 # ![Spaceballs](title.png)
 _"I'm a MOG. Half man, half dog. I'm my own best friend!" - Barf_
 
-Spaceballs is effectively a superpowered replacement for both macOS Mission Control and the App Switcher. It is a
-Frankensteinian attempt to make the abomination that is macOS Spaces a little more useful.
-Spaces were, unfortunately, designed to the lowest common denominator. In an attempt to make them as simple as
-possible for anyone to use, they've severely limited their usefulness. Spaceballs is my personal attempt to
+Spaceballs is a
+Frankensteinian attempt to make the abomination that is macOS Spaces and the default Application Switcher a little more 
+useful.
+macOS Spaces were, unfortunately, designed to the lowest common denominator. In an attempt to make them as simple as
+possible for anyone to use, they've made them nearly useless. Spaceballs is my personal attempt to
 alleviate that for my own productivity.
 
 
 
 ## Table of Contents
 
+- [Disclaimer](#disclaimer)
 - [Inspiration](#inspiration)
 - [Features](#features)
 - [Installation](#installation)
@@ -22,7 +24,18 @@ alleviate that for my own productivity.
 - [How It Works](#how-it-works)
 - [License](#license)
 
+## Disclaimer
+
+This application is 100% vibe coded. It handles no sensitive information whatsoever, which is why I'm comfortable
+with that. If you as a potential user are not comfortable with that, then you can simply avoid using it. I charge no 
+price for this application, nor collect any personal information or telemetry. The project is open source and you 
+are welcome to inspect the code, build it yourself, and/or fork to customize to your needs if you wish. I do not provide 
+any warranty or promise of support for this application. It was built to support my needs as a developer in a 
+multi-Space environment. I am not responsible for any damage or loss of data that may occur from using it. Use at 
+your own risk.
+
 ## Inspiration
+
 Originally inspired by [Contexts](https://contexts.co) — Spaceballs is a fast, keyboard-driven way to switch between
 applications but designed in a
 way that takes advantage of macOS Spaces. Using Spaces is not required and it can be used simply as a more
