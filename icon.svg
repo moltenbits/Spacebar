@@ -1,8 +1,58 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <!-- Two offset window rectangles suggesting spaces/switching -->
-  <rect x="96" y="87" width="220" height="160" rx="16" stroke="#E0E0E0" stroke-width="28" fill="none"/>
-  <rect x="196" y="175" width="220" height="160" rx="16" stroke="#FFFFFF" stroke-width="28" fill="none"/>
-
-  <!-- Spacebar key shape at the bottom -->
-  <rect x="112" y="383" width="288" height="56" rx="12" fill="#FFFFFF"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Spaceballs — Dark Helmet closed: angular scowl eyes, center ridge,
+       horizontal-slat grill with circular perforated breather -->
+  <g fill-rule="evenodd">
+    <!-- shell: tall dome, waist, wide flared skirt -->
+    <path d="M512,86
+             C690,86 826,236 830,404
+             C832,500 790,560 784,618
+             C802,692 890,772 922,848
+             C930,868 916,882 892,888
+             C794,910 650,916 512,916
+             C374,916 230,910 132,888
+             C108,882 94,868 102,848
+             C134,772 222,692 240,618
+             C234,560 192,500 194,404
+             C198,236 334,86 512,86 Z"
+          fill="#111318" stroke="#5b6270" stroke-width="10"/>
+    <!-- subtle dome sheen -->
+    <ellipse cx="396" cy="228" rx="112" ry="74" fill="#1a1d25" transform="rotate(-24 396 228)"/>
+    <!-- brow ridge -->
+    <path d="M246,416 L778,416 L786,452 L238,452 Z" fill="#191d25"/>
+    <!-- slim central ridge, brow to grill -->
+    <rect x="506" y="452" width="12" height="240" fill="#1d212a"/>
+    <!-- angular scowl eye sockets: top edges dive toward center -->
+    <path d="M258,470 L492,540 L492,600 L370,586 L262,532 Z" fill="#454b58"/>
+    <path d="M766,470 L532,540 L532,600 L654,586 L762,532 Z" fill="#454b58"/>
+    <!-- mouth grill: wide trapezoid, horizontal slats -->
+    <path d="M344,690 L680,690 L608,852 L416,852 Z" fill="#262c38"/>
+    <rect x="360" y="718" width="304" height="12" fill="#10131a"/>
+    <rect x="374" y="748" width="276" height="12" fill="#10131a"/>
+    <rect x="388" y="778" width="248" height="12" fill="#10131a"/>
+    <rect x="402" y="808" width="220" height="12" fill="#10131a"/>
+    <!-- circular breather: dark ring, silver disc, perforations -->
+    <circle cx="512" cy="782" r="78" fill="#0c0d10"/>
+    <circle cx="512" cy="782" r="64" fill="#98a0ab"/>
+    <g fill="#14161b">
+      <circle cx="512" cy="782" r="8"/>
+      <circle cx="542" cy="782" r="8"/>
+      <circle cx="527" cy="808" r="8"/>
+      <circle cx="497" cy="808" r="8"/>
+      <circle cx="482" cy="782" r="8"/>
+      <circle cx="497" cy="756" r="8"/>
+      <circle cx="527" cy="756" r="8"/>
+      <circle cx="566" cy="782" r="8"/>
+      <circle cx="559" cy="809" r="8"/>
+      <circle cx="539" cy="829" r="8"/>
+      <circle cx="512" cy="836" r="8"/>
+      <circle cx="485" cy="829" r="8"/>
+      <circle cx="465" cy="809" r="8"/>
+      <circle cx="458" cy="782" r="8"/>
+      <circle cx="465" cy="755" r="8"/>
+      <circle cx="485" cy="735" r="8"/>
+      <circle cx="512" cy="728" r="8"/>
+      <circle cx="539" cy="735" r="8"/>
+      <circle cx="559" cy="755" r="8"/>
+    </g>
+  </g>
 </svg>

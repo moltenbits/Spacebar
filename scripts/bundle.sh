@@ -83,6 +83,7 @@ create_bundle() {
 
     cp "$BUILD_DIR/$BUILD_CONFIG/$product_name" "$macos_dir/spaceballs"
     cp "$RESOURCES_DIR/$plist_name" "$contents_dir/Info.plist"
+    cp "$RESOURCES_DIR/AppIcon.icns" "$resources_dir/AppIcon.icns"
     stamp_version "$contents_dir/Info.plist"
     if [[ "$DISTRIBUTION_SIGNING" != true ]]; then
         stamp_dev_identity "$contents_dir/Info.plist"
