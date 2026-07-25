@@ -1,14 +1,16 @@
 # ![Spaceballs](title.png)
 _"I'm a MOG. Half man, half dog. I'm my own best friend!" - Barf_
 
-Spaceballs is a
-Frankensteinian attempt to make the abomination that is macOS Spaces and the default Application Switcher a little more 
-useful.
-macOS Spaces were, unfortunately, designed to the lowest common denominator. In an attempt to make them as simple as
-possible for anyone to use, they've made them nearly useless. Spaceballs is my personal attempt to
-alleviate that for my own productivity.
+Spaceballs is a Frankensteinian attempt to make the abomination that is macOS Spaces and the default Application 
+Switcher a little more useful for your average power user. macOS Spaces were, unfortunately, designed to the lowest 
+common denominator. In an attempt to make them as simple as possible for anyone to use, they've made them nearly  
+useless. Spaceballs is my personal attempt to alleviate that for my own productivity.
 
-
+The name "Spaceballs" is inspired by:  
+- macOS Spaces, obviously.
+- The cult-classic movie of the same name which poked fun of the incredibly popular Star Wars franchise at the time. 
+- The more Spaces one used, the more balls it felt like one was juggling, the opposite of helping productivity.
+- Holy balls does it have bugs, especially when using with external displays.
 
 ## Table of Contents
 
@@ -40,9 +42,8 @@ your own risk.
 ## Inspiration
 
 Originally inspired by [Contexts](https://contexts.co) — Spaceballs is a fast, keyboard-driven way to switch between
-applications but designed in a
-way that takes advantage of macOS Spaces. Using Spaces is not required and it can be used simply as a more
-advanded app switcher, but for those who prefer to use Spaces, it becomes a superpower.
+applications but designed in a way that takes advantage of macOS Spaces. Using Spaces is not required and it can be
+used simply as a more advanded app switcher, but for those who prefer to use Spaces, it helps tremendously.
 
 In an increasingly AI-powered environment, the ability to multi-task is becoming more important than ever while at
 the same time the ability to regain context when switching between tasks is becoming more and more difficult. The
@@ -55,34 +56,29 @@ see what I could vibe-code one Sunday. Having never touched a line of Swift code
 at what I was able to come up with in a single day. Now here we are, and I continue to add features that I feel
 perfectly compliment users who make heavy use of AI tooling to work on many projects at once.
 
-And "nearly useless" is not hyperbole. A non-exhaustive list of the bugs and design failures Apple Spaces suffers
-from, every one of them verified the hard way while building Spaceballs:
+A non-exhaustive list of the bugs and design failures Apple Spaces suffers from, every one of them verified the hard 
+way while building Spaceballs:
 
+- **The built-in Cmd+Tab switcher is Space-blind.** One icon per app, no matter how many windows across how many
+  Spaces. Ten project Spaces each with a browser, an IDE, and a terminal collapse into three anonymous icons.
 - **Spaces can't be named.** The "Desktop 1", "Desktop 2" labels aren't stored anywhere — they're generated at
   runtime from ordinal position. Rearrange your Spaces and every label silently changes meaning. There is no API,
   no AppleScript, no anything to read or set a Space name.
 - **"Desktop N" numbering isn't even stable.** Mission Control numbers desktops in display-arrangement order,
   while the underlying enumeration order can vary from one call to the next — so the same desktop can be
   "Desktop 3" in one context and not in another.
-- **There is no sanctioned way to move a window to another Space.** The internal APIs that could do it were locked
-  down in macOS 14.5 so that only the Dock itself may call them. The only supported method is manually dragging
-  window thumbnails in Mission Control, one at a time, forever.
+- **There is no sanctioned way to move a window to another Space without using the mouse.** The internal APIs that 
+  could do it were locked down in macOS 14.5 so that only the Dock itself may call them. The only supported method
+  is manually dragging window thumbnails in Mission Control, one at a time, forever. This is excruciatingly slow and 
+  when combined with the next issue, is maddening.
 - **Disconnecting a display scrambles your windows.** macOS evacuates the departed display's Spaces and dumps
-  windows onto whatever Space it feels like; reconnecting the display does not put anything back. This has been
-  broken for years and has arguably gotten worse in recent macOS releases.
-- **New windows can't be opened on the current Space.** Launching or activating an app yanks you to whichever
-  Space the app already lives on (or opens the window over there). There is no API to say "new window, right
-  here."
-- **The window server reports ghost windows.** Closed windows can linger in the window list indefinitely, so
-  anything that trusts it (like a window switcher) shows windows that no longer exist. Only a slow round-trip
-  through Accessibility reveals the truth.
-- **The built-in Cmd+Tab switcher is Space-blind.** One icon per app, no matter how many windows across how many
-  Spaces. Ten project Spaces each with a browser, an IDE, and a terminal collapse into three anonymous icons.
-
-As for the name "Spaceballs", inspiration came about two ways - first the cult classic movie Spaceballs which
-heavily poked fun of the very mainstream Star Wars movies (as I'd love to poke fun of Apple for their modern UX).
-Second, the more one made use of Spaces in their
-workflows, the more balls it felt like one was forced to juggle until all productivity essentially broke down.
+  windows onto whatever Space it feels like; reconnecting the display does not consistently put things back. This has 
+  been broken for years and has arguably gotten worse in recent macOS releases.
+- **Some apps refuse to open new windows on the current Space.** For single-window apps like Music or System
+  Settings this is at least defensible — multiple windows wouldn't make sense, so activating them jumps to
+  wherever their one window lives. But Finder, where having many windows open is completely normal, does the
+  same thing: instead of opening a new window right here, it yanks you off to whichever Space already has one —
+  and there is no API to force "new window, right here."
 
 ## Features
 
