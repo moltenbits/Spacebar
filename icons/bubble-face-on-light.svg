@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Spaceballs — white bubble crew helmet (Winslow ref): ball cut at bottom,
+       face opening reaching the rim, huge dome overhead -->
+  <rect width="1024" height="1024" fill="#ECEBE7"/>
+  <g fill-rule="evenodd" transform="translate(0,60)">
+    <!-- ball, flattened at the bottom -->
+    <path d="M252,760 A390,390 0 1 1 772,760 Q512,836 252,760 Z" fill="#F4F2ED" stroke="#A7ACB6" stroke-width="10"/>
+    <!-- face opening down to the rim (thin shadow ring around the face) -->
+    <path d="M352,778 L352,536 C352,444 672,444 672,536 L672,778 Q512,816 352,778 Z" fill="#191C23"/>
+    <!-- face fills the opening -->
+    <path d="M366,774 L366,541 C366,458 658,458 658,541 L658,774 Q512,808 366,774 Z" fill="#ecc19c"/>
+    <!-- brows -->
+    <path d="M424,566 Q458,558 492,566" stroke="#3a3028" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <path d="M532,566 Q566,558 600,566" stroke="#3a3028" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <!-- eyes -->
+    <circle cx="458" cy="610" r="14" fill="#23262e"/>
+    <circle cx="566" cy="610" r="14" fill="#23262e"/>
+    <!-- nose + deadpan mouth -->
+    <ellipse cx="512" cy="668" rx="11" ry="16" fill="#dca87c"/>
+    <path d="M484,722 L540,722" stroke="#8a5347" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <!-- mic boom -->
+    <path d="M652,754 Q596,766 554,734" stroke="#23262e" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <circle cx="550" cy="732" r="12" fill="#23262e"/>
+  </g>
+</svg>
