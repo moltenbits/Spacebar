@@ -114,6 +114,21 @@ public struct KeyBindings: Codable, Equatable {
     }
   }
 
+  /// Resolves a navigation key press. The vertical keys (defaults ↓ ↑) step
+  /// space by space — Shift jumps straight to the display below/above. The
+  /// horizontal keys (defaults → ←) always target the display in their
+  /// direction; Shift makes no difference there. Each binding slot carries
+  /// the physical direction its default arrow points in.
+  public func navigationCommand(keyCode: UInt16, shiftHeld: Bool) -> NavigationCommand? {
+    switch keyCode {
+    case nextSpace: return shiftHeld ? .display(.down) : .nextSpace
+    case previousSpace: return shiftHeld ? .display(.up) : .previousSpace
+    case nextDisplay: return .display(.right)
+    case previousDisplay: return .display(.left)
+    default: return nil
+    }
+  }
+
   /// Returns pairs of actions that share the same key code.
   public func conflicts() -> [(ShortcutAction, ShortcutAction)] {
     var seen: [UInt16: ShortcutAction] = [:]
@@ -128,6 +143,15 @@ public struct KeyBindings: Codable, Equatable {
     }
     return result
   }
+}
+
+// MARK: - Navigation Command
+
+/// What a navigation key press should do, after modifiers are applied.
+public enum NavigationCommand: Equatable {
+  case nextSpace
+  case previousSpace
+  case display(ArrangementDirection)
 }
 
 // MARK: - Shortcut Action
@@ -150,18 +174,14 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
 
   public var id: String { rawValue }
 
-  public var isDisplayShortcut: Bool {
-    self == .nextDisplay || self == .previousDisplay
-  }
-
   public var label: String {
     switch self {
     case .activateAndNext: "Activate / Next item"
     case .previousItem: "Previous item"
     case .nextSpace: "Next space"
     case .previousSpace: "Previous space"
-    case .nextDisplay: "Next display"
-    case .previousDisplay: "Previous display"
+    case .nextDisplay: "Display to the right"
+    case .previousDisplay: "Display to the left"
     case .renameSpace: "Rename space"
     case .cycleSortOrder: "Cycle sort order"
     case .createSpace: "Create space menu"
@@ -177,10 +197,10 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     switch self {
     case .activateAndNext: "Opens the panel and navigates to the next item"
     case .previousItem: "Navigates to the previous item"
-    case .nextSpace: "Jumps to the next space header"
-    case .previousSpace: "Jumps to the previous space header"
-    case .nextDisplay: "Cycles to the next display"
-    case .previousDisplay: "Cycles to the previous display"
+    case .nextSpace: "Next space, continuing onto the display below (Shift: display below)"
+    case .previousSpace: "Previous space, continuing onto the display above (Shift: display above)"
+    case .nextDisplay: "Moves to the display on the right (Shift optional)"
+    case .previousDisplay: "Moves to the display on the left (Shift optional)"
     case .renameSpace: "Starts renaming the selected space"
     case .cycleSortOrder: "Cycles through space sort orders"
     case .createSpace: "Opens the create space menu"

@@ -184,6 +184,11 @@ public final class SwitcherViewModel: ObservableObject {
   /// Non-empty signals mode 3 (multi-panel per-display).
   public var displayOrder: [String] = []
 
+  /// Physical display layout used for directional (Shift+arrow) display
+  /// targeting. Set by the app when the panel opens; when nil (tests, no
+  /// AppKit context) directional moves fall back to cycling in CGS order.
+  public var displayArrangement: DisplayArrangement?
+
   /// When true, spaces with no windows are included in the switcher.
   public var showEmptySpaces: Bool = true
 
@@ -191,6 +196,10 @@ public final class SwitcherViewModel: ObservableObject {
   /// than the cursor warps the cursor to that display's center (issue #17).
   /// Synced from AppSettings by the app delegate.
   public var warpCursorOnActivation: Bool = false
+
+  /// When true (default), a moved window or Space is activated after the move.
+  /// Synced from AppSettings by the app delegate.
+  public var activateMovedItem: Bool = true
 
   /// How to order sections: MRU, desktop number, or alphabetical.
   public var spaceSortOrder: SpaceSortOrder = .mru
@@ -204,6 +213,28 @@ public final class SwitcherViewModel: ObservableObject {
   /// The display UUID the user is currently navigating in Mode 3.
   /// Used so .spaces/.settings only highlight on the relevant panel.
   @Published public var navigationDisplayUUID: String?
+
+  /// Display of the most-recently-used space as of the last refresh,
+  /// regardless of the configured sort order. The app delegate leads the
+  /// multi-panel display order with it so the panel holding the selection is
+  /// the one showing the space the user most recently activated — keyboard
+  /// focus (NSScreen.main) can lag or never follow activations of empty or
+  /// freshly moved spaces.
+  public private(set) var mruTopDisplayUUID: String?
+
+  /// Focused-display state at the last refresh, used to stamp the space MRU
+  /// only on actual transitions. A steady-state refresh must not re-stamp:
+  /// it would demote a space the user explicitly activated but that keyboard
+  /// focus can't follow (an empty space has no window to take key).
+  private var lastFocusedSpaceID: UInt64?
+  private var lastFrontWindowID: Int?
+
+  /// Set when executeMoveSpace stamps an explicitly activated move. Moving the
+  /// focused display's current space away makes CGS slide a replacement space
+  /// in beneath the user, which the next refresh would misread as the user
+  /// switching to it. The explicit activation is authoritative: the first
+  /// transition stamp from the origin display ranks behind it instead of on top.
+  private var pendingMoveStamp: (spaceID: UInt64, originDisplayUUID: String?)?
 
   /// Persistent MRU history of space IDs, most recent first.
   /// Updated on each refresh() when the current space changes.
@@ -262,9 +293,10 @@ public final class SwitcherViewModel: ObservableObject {
     // Uses .optionOnScreenOnly which guarantees front-to-back Z-order, unlike
     // .optionAll which has unspecified ordering. This ensures the actually-focused
     // window appears first even when activated outside Spaceballs (clicking, Cmd+Tab, etc.).
-    if let focusedSpace = focusedCurrentSpace,
-      let frontWindowID = spaceManager.frontmostWindowID(onSpace: focusedSpace)
-    {
+    let frontWindowID = focusedCurrentSpace.flatMap {
+      spaceManager.frontmostWindowID(onSpace: $0)
+    }
+    if let frontWindowID {
       windowMRUHistory.removeAll { $0 == frontWindowID }
       windowMRUHistory.insert(frontWindowID, at: 0)
     }
@@ -278,9 +310,32 @@ public final class SwitcherViewModel: ObservableObject {
     // This preserves ordering across space switches — e.g., switching from
     // Desktop 3 → Desktop 2 gives history [2, 3, ...] so Desktop 3 stays
     // second even though Z-order won't reflect its recency.
+    //
+    // Stamp only on a transition (focused space or frontmost window changed
+    // since the last refresh). A steady-state re-stamp would demote a space
+    // the user explicitly activated via `activateSelected` but that focus
+    // cannot follow — an empty space has no window to take keyboard focus,
+    // so NSScreen.main keeps reporting the old display (issue: empty space
+    // pinned to the bottom of the switcher no matter how often activated).
     if let currentID = focusedCurrentSpace {
-      spaceMRUHistory.removeAll { $0 == currentID }
-      spaceMRUHistory.insert(currentID, at: 0)
+      if currentID != lastFocusedSpaceID || frontWindowID != lastFrontWindowID {
+        spaceMRUHistory.removeAll { $0 == currentID }
+        var insertionIndex = 0
+        if let pending = pendingMoveStamp {
+          // The origin display's replacement space still earns that display's
+          // most-recent rank — just beneath the explicitly activated space.
+          let currentDisplayUUID = spaces.first(where: { $0.id == currentID })?.displayUUID
+          if currentID != pending.spaceID, currentDisplayUUID == pending.originDisplayUUID,
+            let stampedIndex = spaceMRUHistory.firstIndex(of: pending.spaceID)
+          {
+            insertionIndex = stampedIndex + 1
+          }
+          pendingMoveStamp = nil
+        }
+        spaceMRUHistory.insert(currentID, at: insertionIndex)
+      }
+      lastFocusedSpaceID = currentID
+      lastFrontWindowID = frontWindowID
     }
 
     // Build the final space order:
@@ -338,6 +393,9 @@ public final class SwitcherViewModel: ObservableObject {
       globalCounter += 1
       desktopOrdinal[space.id] = globalCounter
     }
+
+    // Record the MRU-top space's display before any sort reshuffles the order.
+    mruTopDisplayUUID = spaceMRUOrder.first.flatMap { spaceInfoMap[$0]?.displayUUID }
 
     // Apply configured sort order.
     switch spaceSortOrder {
@@ -694,6 +752,30 @@ public final class SwitcherViewModel: ObservableObject {
     }
   }
 
+  /// First selectable item of the display reached by walking the physical
+  /// arrangement in `direction`. Entering downward lands on that display's
+  /// first space, entering upward on its last — the spatially nearest end.
+  /// Walks past displays with no visible sections; nil when nothing lies
+  /// in that direction.
+  private func verticalNeighborEntry(
+    from displayUUID: String, direction: ArrangementDirection
+  ) -> SelectedItem? {
+    guard let arrangement = displayArrangement else { return nil }
+    var visited: Set<String> = [displayUUID]
+    var current = displayUUID
+    while let next = arrangement.neighborUUID(of: current, direction: direction),
+      !visited.contains(next)
+    {
+      visited.insert(next)
+      let displaySections = filteredSections.filter { $0.displayUUID == next }
+      if let target = direction == .down ? displaySections.first : displaySections.last {
+        return target.windows.first.map { .windowRow($0.id) } ?? .spaceHeader(target.id)
+      }
+      current = next
+    }
+    return nil
+  }
+
   public func moveToNextSpace() {
     let items = flatSelectableItems
     guard !items.isEmpty else { return }
@@ -728,6 +810,23 @@ public final class SwitcherViewModel: ObservableObject {
     }
 
     let currentSpace = spaceID(for: current, using: map)
+
+    // Mode 3 with a known arrangement: at a display's last space, ↓ continues
+    // onto the display physically BELOW, entering at its first space — the
+    // crossing follows the arrangement, not displayOrder (which is MRU-led).
+    // No display below is a no-op.
+    if !displayOrder.isEmpty, displayArrangement != nil, let currentSpace,
+      let currentSection = filteredSections.first(where: { $0.id == currentSpace }),
+      filteredSections.last(where: { $0.displayUUID == currentSection.displayUUID })?.id
+        == currentSpace
+    {
+      if let entry = verticalNeighborEntry(
+        from: currentSection.displayUUID, direction: .down)
+      {
+        selectedItem = entry
+      }
+      return
+    }
 
     // In Mode 3, find the display group boundary so we stop at .spaces
     let groupEnd: Int?
@@ -810,6 +909,22 @@ public final class SwitcherViewModel: ObservableObject {
     }
 
     let currentSpace = spaceID(for: current, using: map)
+
+    // Mode 3 with a known arrangement: at a display's first space, ↑ continues
+    // onto the display physically ABOVE, entering at its last space.
+    // No display above is a no-op.
+    if !displayOrder.isEmpty, displayArrangement != nil, let currentSpace,
+      let currentSection = filteredSections.first(where: { $0.id == currentSpace }),
+      filteredSections.first(where: { $0.displayUUID == currentSection.displayUUID })?.id
+        == currentSpace
+    {
+      if let entry = verticalNeighborEntry(
+        from: currentSection.displayUUID, direction: .up)
+      {
+        selectedItem = entry
+      }
+      return
+    }
 
     // In Mode 3, find the display group boundary
     let groupStart: Int?
@@ -1029,7 +1144,12 @@ public final class SwitcherViewModel: ObservableObject {
         // Activate the first window in this space to trigger space switch
         windowID = firstWindow.id
       } else {
-        // Empty space — switch via Dock accessibility (Mission Control)
+        // Empty space — switch via Dock accessibility (Mission Control).
+        // Stamp the space MRU directly: focus-based inference in refresh()
+        // can't see this switch — an empty space has no window to move
+        // keyboard focus to its display.
+        spaceMRUHistory.removeAll { $0 == spaceID }
+        spaceMRUHistory.insert(spaceID, at: 0)
         let allSpaces = spaceManager.getAllSpaces()
         let displaySpaces = allSpaces.filter { $0.displayUUID == section.displayUUID }
           .filter { $0.type == .desktop }
@@ -1119,6 +1239,31 @@ public final class SwitcherViewModel: ObservableObject {
     moveMarkedWindowToAdjacentDisplay(forward: false)
   }
 
+  /// Moves the marked window row toward the display in `direction` on the
+  /// physical arrangement. No-op when the arrangement has no display there
+  /// (or it has no visible section to receive the row); falls back to
+  /// cycling when no arrangement is available.
+  public func moveMarkedWindow(inDirection direction: ArrangementDirection) {
+    guard moveMode, let windowID = markedWindowID,
+      let sourceIdx = sections.firstIndex(where: {
+        $0.windows.contains(where: { $0.id == windowID })
+      })
+    else { return }
+
+    guard let arrangement = displayArrangement else {
+      moveMarkedWindowToAdjacentDisplay(
+        forward: direction == .right || direction == .down)
+      return
+    }
+
+    guard
+      let targetUUID = arrangement.neighborUUID(
+        of: sections[sourceIdx].displayUUID, direction: direction),
+      let targetIdx = sections.firstIndex(where: { $0.displayUUID == targetUUID })
+    else { return }
+    moveMarkedWindowRow(windowID: windowID, from: sourceIdx, to: targetIdx)
+  }
+
   private func moveMarkedWindowToAdjacentDisplay(forward: Bool) {
     guard moveMode, let windowID = markedWindowID,
       let sourceIdx = sections.firstIndex(where: {
@@ -1147,8 +1292,12 @@ public final class SwitcherViewModel: ObservableObject {
         break
       }
     }
-    guard let targetIdx,
-      let rowIdx = sections[sourceIdx].windows.firstIndex(where: { $0.id == windowID })
+    guard let targetIdx else { return }
+    moveMarkedWindowRow(windowID: windowID, from: sourceIdx, to: targetIdx)
+  }
+
+  private func moveMarkedWindowRow(windowID: Int, from sourceIdx: Int, to targetIdx: Int) {
+    guard let rowIdx = sections[sourceIdx].windows.firstIndex(where: { $0.id == windowID })
     else { return }
 
     var updated = sections
@@ -1227,9 +1376,12 @@ public final class SwitcherViewModel: ObservableObject {
     let moveTargetSpaceID = targetSpaceID
     cancelMoveMode()
 
+    let activateAfterMove = activateMovedItem
     DispatchQueue.global(qos: .userInteractive).async { [spaceManager] in
       do {
-        try spaceManager.moveWindowToSpace(windowID: moveWindowID, targetSpaceID: moveTargetSpaceID)
+        try spaceManager.moveWindowToSpace(
+          windowID: moveWindowID, targetSpaceID: moveTargetSpaceID,
+          activateAfterMove: activateAfterMove)
       } catch {
         print("Failed to move window \(moveWindowID) to space \(moveTargetSpaceID): \(error)")
       }
@@ -1304,6 +1456,27 @@ public final class SwitcherViewModel: ObservableObject {
     retargetMarkedSpace(offset: -1)
   }
 
+  /// Retargets the marked space toward the display in `direction` on the
+  /// physical arrangement. No-op when the arrangement has no display there;
+  /// falls back to cycling when no arrangement is available.
+  public func moveMarkedSpace(inDirection direction: ArrangementDirection) {
+    guard spaceMoveMode, let spaceID = markedSpaceID,
+      let sectionIndex = sections.firstIndex(where: { $0.id == spaceID })
+    else { return }
+
+    guard let arrangement = displayArrangement else {
+      retargetMarkedSpace(offset: direction == .right || direction == .down ? 1 : -1)
+      return
+    }
+
+    guard
+      let targetUUID = arrangement.neighborUUID(
+        of: sections[sectionIndex].displayUUID, direction: direction),
+      let target = spaceMoveDisplays.first(where: { $0.uuid == targetUUID })
+    else { return }
+    retargetMarkedSpace(to: target, sectionIndex: sectionIndex)
+  }
+
   /// Retags the marked section with the adjacent display in the cycle. The
   /// per-display panels filter sections by `displayUUID`, so retagging is what
   /// visually moves the section between displays.
@@ -1317,8 +1490,14 @@ public final class SwitcherViewModel: ObservableObject {
     else { return }
 
     let count = spaceMoveDisplays.count
-    let next = spaceMoveDisplays[(position + offset + count) % count]
+    retargetMarkedSpace(
+      to: spaceMoveDisplays[(position + offset + count) % count],
+      sectionIndex: sectionIndex)
+  }
 
+  private func retargetMarkedSpace(
+    to next: (uuid: String, name: String), sectionIndex: Int
+  ) {
     let old = sections[sectionIndex]
     sections[sectionIndex] = SwitcherSection(
       id: old.id,
@@ -1329,7 +1508,7 @@ public final class SwitcherViewModel: ObservableObject {
       isCurrent: old.isCurrent,
       ordinalLabel: old.ordinalLabel,
       windows: old.windows)
-    selectedItem = .spaceHeader(spaceID)
+    selectedItem = .spaceHeader(old.id)
   }
 
   /// Executes the move: relocates the marked space to whatever display its
@@ -1346,10 +1525,33 @@ public final class SwitcherViewModel: ObservableObject {
 
     guard targetDisplayUUID != originDisplayUUID else { return false }
 
+    let activateAfterMove = activateMovedItem
+    if activateAfterMove {
+      // The post-move activation happens deep inside SpaceManager (a Mission
+      // Control tile press), which focus inference in refresh() may never
+      // see — an activated space needn't take keyboard focus. Stamp the MRU
+      // here so the next panel open shows the moved space as most recent.
+      spaceMRUHistory.removeAll { $0 == spaceID }
+      spaceMRUHistory.insert(spaceID, at: 0)
+      pendingMoveStamp = (spaceID, originDisplayUUID)
+    }
+    let warpAfterMove = activateAfterMove && warpCursorOnActivation
     DispatchQueue.global(qos: .userInteractive).async { [spaceManager] in
       do {
-        try spaceManager.moveSpaceToDisplay(
-          spaceID: spaceID, targetDisplayUUID: targetDisplayUUID)
+        let moved = try spaceManager.moveSpaceToDisplay(
+          spaceID: spaceID, targetDisplayUUID: targetDisplayUUID,
+          activateAfterMove: activateAfterMove)
+        // Center the cursor on the activated space's display. Deliberately
+        // not routed through CursorWarpPlanner: the MC drag already leaves
+        // the pointer on the target display (at the drop point over the
+        // spaces bar), and the planner suppresses same-display warps.
+        if moved && warpAfterMove,
+          let displayID = SpaceManager.displayIDForUUID(targetDisplayUUID)
+        {
+          DispatchQueue.main.async {
+            SpaceManager.warpCursorToDisplayCenter(displayID)
+          }
+        }
       } catch {
         print("Failed to move space \(spaceID) to display \(targetDisplayUUID): \(error)")
       }

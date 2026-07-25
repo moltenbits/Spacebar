@@ -176,6 +176,16 @@ public final class AppSettings: ObservableObject {
     didSet { defaults.set(warpCursorOnActivation, forKey: "warpCursorOnActivation") }
   }
 
+  // MARK: - Move Activation
+
+  /// When on (default), a window moved to another Space — or a Space moved to
+  /// another display — is activated after the move: the target Space becomes
+  /// current and a moved window is brought to front. When off, moves are pure
+  /// layout surgery and the user's current view stays put.
+  @Published public var activateMovedItem: Bool {
+    didSet { defaults.set(activateMovedItem, forKey: "activateMovedItem") }
+  }
+
   // MARK: - Diagnostics
 
   /// Master switch. When off, `Diagnostics.log(...)` calls are no-ops. Default off.
@@ -214,6 +224,7 @@ public final class AppSettings: ObservableObject {
       "resizeMargins": 0.0,
       "rememberWindowLayouts": true,
       "warpCursorOnActivation": false,
+      "activateMovedItem": true,
     ])
 
     self.showAppIcons = defaults.bool(forKey: "showAppIcons")
@@ -229,6 +240,7 @@ public final class AppSettings: ObservableObject {
     self.spaceSortOrder =
       SpaceSortOrder(rawValue: defaults.string(forKey: "spaceSortOrder") ?? "") ?? .mru
     self.warpCursorOnActivation = defaults.bool(forKey: "warpCursorOnActivation")
+    self.activateMovedItem = defaults.bool(forKey: "activateMovedItem")
 
     // Load workspaces (with migration from old customSpaceNames format)
     if let data = defaults.data(forKey: "workspaces"),

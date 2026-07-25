@@ -13,6 +13,11 @@ struct MoveCommand: ParsableCommand {
   @Argument(help: "Target space ID, name, or \"Desktop N\" (IDs from 'spaceballs list')")
   var targetSpace: String
 
+  @Flag(
+    name: .customLong("no-activate"),
+    help: "Don't switch to the target space or bring the moved window to front")
+  var noActivate = false
+
   func run() throws {
     let manager = SpaceManager()
     let spaceNameStore = SpaceNameStore()
@@ -71,7 +76,8 @@ struct MoveCommand: ParsableCommand {
       spaceID = resolved
     }
 
-    let ok = try manager.moveWindowToSpace(windowID: windowID, targetSpaceID: spaceID)
+    let ok = try manager.moveWindowToSpace(
+      windowID: windowID, targetSpaceID: spaceID, activateAfterMove: !noActivate)
     if !ok {
       print("Move failed.")
       throw ExitCode.failure

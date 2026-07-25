@@ -270,8 +270,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func showPanel() {
     Diagnostics.log("panel", "switcher show")
     viewModel.overrideDisplayUUID = nil
+    viewModel.displayArrangement = Self.currentArrangement()
     viewModel.showEmptySpaces = appSettings.showEmptySpaces
     viewModel.warpCursorOnActivation = appSettings.warpCursorOnActivation
+    viewModel.activateMovedItem = appSettings.activateMovedItem
 
     let multiPanel = isMultiPanelPerDisplay
     let screens = targetScreens()
@@ -284,21 +286,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     viewModel.filterByDisplay = appSettings.filterSpacesByDisplay && !multiPanel
     viewModel.spaceSortOrder = appSettings.spaceSortOrder
 
+    if !multiPanel {
+      viewModel.displayOrder = []
+    }
+
+    // Refresh before building the display order: the MRU-top display is a
+    // refresh product.
+    viewModel.refresh()
+
     if multiPanel {
-      // Build display order: active display first, then the rest in screen order
+      // Build display order: the display of the most recently used space
+      // first, then the rest in screen order. Keyed off the view model's MRU
+      // rather than NSScreen.main because keyboard focus can lag or never
+      // follow an activation (empty spaces, freshly moved spaces) — the
+      // initial selection lands in the first display group, and it should
+      // start on the space the user most recently activated.
       var order: [String] = []
-      if let uuid = activeUUID { order.append(uuid) }
+      if let uuid = viewModel.mruTopDisplayUUID ?? activeUUID { order.append(uuid) }
       for screen in NSScreen.screens {
         if let uuid = Self.displayUUID(for: screen), !order.contains(uuid) {
           order.append(uuid)
         }
       }
       viewModel.displayOrder = order
-    } else {
-      viewModel.displayOrder = []
     }
 
-    viewModel.refresh()
     viewModel.resetSelection()
 
     // Ensure we have enough panels
@@ -424,49 +436,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return CFUUIDCreateString(nil, cfUUID) as String
   }
 
-  private func cycleDisplay(forward: Bool) {
-    // Never cycle panel content while a move is pending — refresh() would wipe
+  /// The physical layout of the connected displays, in NSScreen (y-up)
+  /// global coordinates.
+  private static func currentArrangement() -> DisplayArrangement {
+    DisplayArrangement(
+      displays: NSScreen.screens.compactMap { screen in
+        displayUUID(for: screen).map {
+          DisplayArrangement.Display(uuid: $0, frame: screen.frame)
+        }
+      })
+  }
+
+  /// Moves the selection to the display physically in `direction`; no-op
+  /// when there is none in that direction.
+  private func navigateDisplay(_ direction: ArrangementDirection) {
+    // Never touch panel content while a move is pending — refresh() would wipe
     // the visual relocation and the marked item's context (issue #18). The
-    // delegate methods route these keys to the marked-item movers instead;
+    // delegate method routes these keys to the marked-item movers instead;
     // this guard is belt-and-braces for any other caller.
     guard !viewModel.moveMode && !viewModel.spaceMoveMode else { return }
     guard appSettings.filterSpacesByDisplay else { return }
-    let screens = NSScreen.screens
-    guard screens.count > 1 else { return }
+    guard NSScreen.screens.count > 1 else { return }
 
+    let currentUUID =
+      isMultiPanelPerDisplay
+      ? (viewModel.activeDisplayUUID ?? viewModel.displayOrder.first)
+      : currentPanelDisplayUUID
+    guard let currentUUID,
+      let targetUUID = Self.currentArrangement().neighborUUID(
+        of: currentUUID, direction: direction)
+    else { return }
+    focusDisplay(uuid: targetUUID)
+  }
+
+  private func focusDisplay(uuid targetUUID: String) {
     if isMultiPanelPerDisplay {
-      // Mode 3: move selection to next/previous display's first window
+      // Mode 3: move selection to the target display's first window
       // and make that panel the key window.
-      let order = viewModel.displayOrder
-      guard order.count > 1 else { return }
-      let currentUUID = viewModel.activeDisplayUUID ?? order.first ?? ""
-      let currentIdx = order.firstIndex(of: currentUUID) ?? 0
-      let nextIdx =
-        forward
-        ? (currentIdx + 1) % order.count
-        : (currentIdx - 1 + order.count) % order.count
-      let targetUUID = order[nextIdx]
       viewModel.selectFirstWindow(onDisplay: targetUUID)
-
-      // Move key window to the target panel
       if let targetPanel = panels.first(where: { $0.displayUUID == targetUUID }) {
         targetPanel.makeKeyAndOrderFront(nil)
       }
       currentPanelDisplayUUID = targetUUID
     } else {
-      // Mode 2: single panel, cycle display content
-      let currentIndex =
-        screens.firstIndex(where: {
-          Self.displayUUID(for: $0) == currentPanelDisplayUUID
-        }) ?? 0
-
-      let nextIndex =
-        forward
-        ? (currentIndex + 1) % screens.count
-        : (currentIndex - 1 + screens.count) % screens.count
-      let targetScreen = screens[nextIndex]
-
-      let targetUUID = Self.displayUUID(for: targetScreen)
+      // Mode 2: single panel, switch its display content
+      guard
+        let targetScreen = NSScreen.screens.first(where: {
+          Self.displayUUID(for: $0) == targetUUID
+        })
+      else { return }
       viewModel.overrideDisplayUUID = targetUUID
       viewModel.refresh()
       viewModel.resetSelection()
@@ -640,8 +658,10 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveCreateSelectionDown()
     } else if viewModel.moveMode {
       viewModel.moveMarkedWindowToNextSpace()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
       viewModel.moveMarkedSpaceToNextDisplay()
+      resizePanelsToFit()
     } else {
       viewModel.moveSelectionDown()
     }
@@ -652,8 +672,10 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveCreateSelectionUp()
     } else if viewModel.moveMode {
       viewModel.moveMarkedWindowToPreviousSpace()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
       viewModel.moveMarkedSpaceToPreviousDisplay()
+      resizePanelsToFit()
     } else {
       viewModel.moveSelectionUp()
     }
@@ -722,23 +744,15 @@ extension AppDelegate: KeyInterceptorDelegate {
     openSettings()
   }
 
-  func keyInterceptorCycleDisplayLeft() {
+  func keyInterceptorMoveDisplay(_ direction: ArrangementDirection) {
     if viewModel.moveMode {
-      viewModel.moveMarkedWindowToPreviousDisplay()
+      viewModel.moveMarkedWindow(inDirection: direction)
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
-      viewModel.moveMarkedSpaceToPreviousDisplay()
+      viewModel.moveMarkedSpace(inDirection: direction)
+      resizePanelsToFit()
     } else {
-      cycleDisplay(forward: false)
-    }
-  }
-
-  func keyInterceptorCycleDisplayRight() {
-    if viewModel.moveMode {
-      viewModel.moveMarkedWindowToNextDisplay()
-    } else if viewModel.spaceMoveMode {
-      viewModel.moveMarkedSpaceToNextDisplay()
-    } else {
-      cycleDisplay(forward: true)
+      navigateDisplay(direction)
     }
   }
 
@@ -747,8 +761,12 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveCreateSelectionDown()
     } else if viewModel.moveMode {
       viewModel.moveMarkedWindowToNextSpace()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
-      viewModel.moveMarkedSpaceToNextDisplay()
+      // A marked space only moves display-to-display, so ↓ is directional
+      // like the rest; Cmd+Tab keeps the linear cycle for reachability.
+      viewModel.moveMarkedSpace(inDirection: .down)
+      resizePanelsToFit()
     } else {
       viewModel.moveToNextSpace()
     }
@@ -759,8 +777,10 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveCreateSelectionUp()
     } else if viewModel.moveMode {
       viewModel.moveMarkedWindowToPreviousSpace()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
-      viewModel.moveMarkedSpaceToPreviousDisplay()
+      viewModel.moveMarkedSpace(inDirection: .up)
+      resizePanelsToFit()
     } else {
       viewModel.moveToPreviousSpace()
     }
