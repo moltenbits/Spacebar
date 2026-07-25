@@ -209,6 +209,14 @@ public final class SwitcherViewModel: ObservableObject {
   /// Used so .spaces/.settings only highlight on the relevant panel.
   @Published public var navigationDisplayUUID: String?
 
+  /// Display of the most-recently-used space as of the last refresh,
+  /// regardless of the configured sort order. The app delegate leads the
+  /// multi-panel display order with it so the panel holding the selection is
+  /// the one showing the space the user most recently activated — keyboard
+  /// focus (NSScreen.main) can lag or never follow activations of empty or
+  /// freshly moved spaces.
+  public private(set) var mruTopDisplayUUID: String?
+
   /// Focused-display state at the last refresh, used to stamp the space MRU
   /// only on actual transitions. A steady-state refresh must not re-stamp:
   /// it would demote a space the user explicitly activated but that keyboard
@@ -361,6 +369,9 @@ public final class SwitcherViewModel: ObservableObject {
       globalCounter += 1
       desktopOrdinal[space.id] = globalCounter
     }
+
+    // Record the MRU-top space's display before any sort reshuffles the order.
+    mruTopDisplayUUID = spaceMRUOrder.first.flatMap { spaceInfoMap[$0]?.displayUUID }
 
     // Apply configured sort order.
     switch spaceSortOrder {
@@ -1386,11 +1397,23 @@ public final class SwitcherViewModel: ObservableObject {
       spaceMRUHistory.removeAll { $0 == spaceID }
       spaceMRUHistory.insert(spaceID, at: 0)
     }
+    let warpAfterMove = activateAfterMove && warpCursorOnActivation
     DispatchQueue.global(qos: .userInteractive).async { [spaceManager] in
       do {
-        try spaceManager.moveSpaceToDisplay(
+        let moved = try spaceManager.moveSpaceToDisplay(
           spaceID: spaceID, targetDisplayUUID: targetDisplayUUID,
           activateAfterMove: activateAfterMove)
+        // Center the cursor on the activated space's display. Deliberately
+        // not routed through CursorWarpPlanner: the MC drag already leaves
+        // the pointer on the target display (at the drop point over the
+        // spaces bar), and the planner suppresses same-display warps.
+        if moved && warpAfterMove,
+          let displayID = SpaceManager.displayIDForUUID(targetDisplayUUID)
+        {
+          DispatchQueue.main.async {
+            SpaceManager.warpCursorToDisplayCenter(displayID)
+          }
+        }
       } catch {
         print("Failed to move space \(spaceID) to display \(targetDisplayUUID): \(error)")
       }

@@ -285,21 +285,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     viewModel.filterByDisplay = appSettings.filterSpacesByDisplay && !multiPanel
     viewModel.spaceSortOrder = appSettings.spaceSortOrder
 
+    if !multiPanel {
+      viewModel.displayOrder = []
+    }
+
+    // Refresh before building the display order: the MRU-top display is a
+    // refresh product.
+    viewModel.refresh()
+
     if multiPanel {
-      // Build display order: active display first, then the rest in screen order
+      // Build display order: the display of the most recently used space
+      // first, then the rest in screen order. Keyed off the view model's MRU
+      // rather than NSScreen.main because keyboard focus can lag or never
+      // follow an activation (empty spaces, freshly moved spaces) — the
+      // initial selection lands in the first display group, and it should
+      // start on the space the user most recently activated.
       var order: [String] = []
-      if let uuid = activeUUID { order.append(uuid) }
+      if let uuid = viewModel.mruTopDisplayUUID ?? activeUUID { order.append(uuid) }
       for screen in NSScreen.screens {
         if let uuid = Self.displayUUID(for: screen), !order.contains(uuid) {
           order.append(uuid)
         }
       }
       viewModel.displayOrder = order
-    } else {
-      viewModel.displayOrder = []
     }
 
-    viewModel.refresh()
     viewModel.resetSelection()
 
     // Ensure we have enough panels

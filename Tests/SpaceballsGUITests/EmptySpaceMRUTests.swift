@@ -166,6 +166,39 @@ struct SpaceMoveMRUTests {
     // model must have stamped it directly.
     vm.refresh()
     #expect(vm.sections.first?.id == 3)
+
+    // Once CGS reflects the move (space 3 now lives on display-1), the
+    // MRU-top display must follow it — the panel uses this to decide which
+    // display's panel starts with the selection.
+    ds.displaySpaces = [
+      display(
+        uuid: "display-1",
+        spaces: [
+          space(id: 1, uuid: "uuid-1"), space(id: 2, uuid: "uuid-2"),
+          space(id: 3, uuid: "uuid-3"),
+        ],
+        current: 3),
+      display(
+        uuid: "display-2",
+        spaces: [space(id: 4, uuid: "uuid-4")],
+        current: 4),
+    ]
+    vm.refresh()
+    #expect(vm.mruTopDisplayUUID == "display-1")
+  }
+
+  @Test("mruTopDisplayUUID follows an explicit empty-space activation")
+  func mruTopDisplayFollowsEmptySpaceActivation() {
+    let ds = makeEmptySpaceScenario()
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    vm.overrideDisplayUUID = "display-1"
+    vm.refresh()
+    #expect(vm.mruTopDisplayUUID == "display-1")
+
+    vm.selectedItem = .spaceHeader(4)
+    vm.activateSelected()
+    vm.refresh()
+    #expect(vm.mruTopDisplayUUID == "display-2")
   }
 
   @Test("Executing a space move without activation does not promote it")
