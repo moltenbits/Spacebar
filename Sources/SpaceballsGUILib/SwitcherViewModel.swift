@@ -1154,7 +1154,7 @@ public final class SwitcherViewModel: ObservableObject {
         do {
           try spaceManager.activateSpace(id: spaceID)
         } catch {
-          print("Failed to activate space \(spaceID): \(error)")
+          Diagnostics.log("activate", "space \(spaceID) failed: \(error)")
         }
         return
       }
@@ -1167,7 +1167,7 @@ public final class SwitcherViewModel: ObservableObject {
     do {
       try spaceManager.activateWindow(id: windowID)
     } catch {
-      print("Failed to activate window \(windowID): \(error)")
+      Diagnostics.log("activate", "window \(windowID) failed: \(error)")
     }
   }
 
@@ -1381,7 +1381,8 @@ public final class SwitcherViewModel: ObservableObject {
           windowID: moveWindowID, targetSpaceID: moveTargetSpaceID,
           activateAfterMove: activateAfterMove)
       } catch {
-        print("Failed to move window \(moveWindowID) to space \(moveTargetSpaceID): \(error)")
+        Diagnostics.log(
+          "move-window", "window \(moveWindowID) to space \(moveTargetSpaceID) failed: \(error)")
       }
     }
 
@@ -1562,7 +1563,8 @@ public final class SwitcherViewModel: ObservableObject {
           }
         }
       } catch {
-        print("Failed to move space \(spaceID) to display \(targetDisplayUUID): \(error)")
+        Diagnostics.log(
+          "move-space-display", "space \(spaceID) to \(targetDisplayUUID) failed: \(error)")
       }
     }
 
@@ -1605,7 +1607,7 @@ public final class SwitcherViewModel: ObservableObject {
     do {
       try spaceManager.closeWindow(id: windowID)
     } catch {
-      print("Failed to close window \(windowID): \(error)")
+      Diagnostics.log("window", "close \(windowID) failed: \(error)")
       return
     }
     windowMRUHistory.removeAll { $0 == windowID }
@@ -1634,7 +1636,7 @@ public final class SwitcherViewModel: ObservableObject {
     do {
       try spaceManager.quitApp(owningWindowID: windowID)
     } catch {
-      print("Failed to quit app for window \(windowID): \(error)")
+      Diagnostics.log("window", "quit app for window \(windowID) failed: \(error)")
       return
     }
     // Remove all MRU entries and rows for the quitting app immediately
