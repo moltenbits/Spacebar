@@ -159,6 +159,10 @@ Spaceballs can move windows between Spaces — something macOS does not expose v
 4. **Release Cmd** to execute the move — Spaceballs activates the window, opens Mission Control, drags the window to the target space, switches to that space, and brings the window to front
 5. **Escape** to cancel move mode at any time
 
+By default the moved window becomes the active window on its new Space. If your workflow prefers moves that don't
+pull you along, turn off "Activate moved windows and Spaces" in Settings → General (CLI: `--no-activate`) — the
+window is moved in the background and your current view is restored.
+
 The move can also be performed from the CLI:
 
 ```bash
@@ -178,6 +182,10 @@ prerequisites automatically (creates a sibling Space / switches away first).
 2. **Cmd+Shift+M** to enter space-move mode
 3. **Cmd+← / Cmd+→** to cycle the marked Space between displays
 4. **Release Cmd** to execute the move, or **Escape** to cancel
+
+By default the moved Space becomes the active Space on its destination display. The same
+"Activate moved windows and Spaces" setting (Settings → General, CLI: `--no-activate`) turns this off, leaving
+every display's current Space exactly as it was.
 
 From the CLI:
 

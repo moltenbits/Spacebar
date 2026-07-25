@@ -19,6 +19,7 @@ public struct SettingsExport: Codable {
   public var resizeMargins: Double
   public var resizePresets: [ResizePreset]
   public var warpCursorOnActivation: Bool
+  public var activateMovedItem: Bool
 
   public init(
     showAppIcons: Bool, showCurrentBadge: Bool, showDisplayBadge: Bool,
@@ -28,7 +29,8 @@ public struct SettingsExport: Codable {
     workspaces: [WorkspaceConfig],
     resizeGridColumns: Int = 12, resizeGridRows: Int = 12,
     resizeMargins: Double = 0, resizePresets: [ResizePreset]? = nil,
-    warpCursorOnActivation: Bool = false
+    warpCursorOnActivation: Bool = false,
+    activateMovedItem: Bool = true
   ) {
     self.showAppIcons = showAppIcons
     self.showCurrentBadge = showCurrentBadge
@@ -49,6 +51,7 @@ public struct SettingsExport: Codable {
       resizePresets
       ?? ResizePreset.defaultPresets(gridColumns: resizeGridColumns, gridRows: resizeGridRows)
     self.warpCursorOnActivation = warpCursorOnActivation
+    self.activateMovedItem = activateMovedItem
   }
 
   public static func from(settings: AppSettings) -> SettingsExport {
@@ -69,7 +72,8 @@ public struct SettingsExport: Codable {
       resizeGridRows: settings.resizeGridRows,
       resizeMargins: settings.resizeMargins,
       resizePresets: settings.resizePresets,
-      warpCursorOnActivation: settings.warpCursorOnActivation
+      warpCursorOnActivation: settings.warpCursorOnActivation,
+      activateMovedItem: settings.activateMovedItem
     )
   }
 
@@ -91,6 +95,7 @@ public struct SettingsExport: Codable {
     settings.resizeMargins = resizeMargins
     settings.resizePresets = resizePresets
     settings.warpCursorOnActivation = warpCursorOnActivation
+    settings.activateMovedItem = activateMovedItem
   }
 
   // Support importing legacy exports that used customSpaceNames: [String]
@@ -100,6 +105,7 @@ public struct SettingsExport: Codable {
     case excludedBundleIDs, keyBindings, workspaces, customSpaceNames
     case resizeGridColumns, resizeGridRows, resizeMargins, resizePresets
     case warpCursorOnActivation
+    case activateMovedItem
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -121,6 +127,7 @@ public struct SettingsExport: Codable {
     try c.encode(resizeMargins, forKey: .resizeMargins)
     try c.encode(resizePresets, forKey: .resizePresets)
     try c.encode(warpCursorOnActivation, forKey: .warpCursorOnActivation)
+    try c.encode(activateMovedItem, forKey: .activateMovedItem)
   }
 
   public init(from decoder: Decoder) throws {
@@ -154,6 +161,8 @@ public struct SettingsExport: Codable {
       ?? ResizePreset.defaultPresets(gridColumns: resizeGridColumns, gridRows: resizeGridRows)
     warpCursorOnActivation =
       try c.decodeIfPresent(Bool.self, forKey: .warpCursorOnActivation) ?? false
+    activateMovedItem =
+      try c.decodeIfPresent(Bool.self, forKey: .activateMovedItem) ?? true
   }
 
   public static func exportJSON(settings: AppSettings) throws -> Data {

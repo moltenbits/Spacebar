@@ -192,6 +192,10 @@ public final class SwitcherViewModel: ObservableObject {
   /// Synced from AppSettings by the app delegate.
   public var warpCursorOnActivation: Bool = false
 
+  /// When true (default), a moved window or Space is activated after the move.
+  /// Synced from AppSettings by the app delegate.
+  public var activateMovedItem: Bool = true
+
   /// How to order sections: MRU, desktop number, or alphabetical.
   public var spaceSortOrder: SpaceSortOrder = .mru
 
@@ -1227,9 +1231,12 @@ public final class SwitcherViewModel: ObservableObject {
     let moveTargetSpaceID = targetSpaceID
     cancelMoveMode()
 
+    let activateAfterMove = activateMovedItem
     DispatchQueue.global(qos: .userInteractive).async { [spaceManager] in
       do {
-        try spaceManager.moveWindowToSpace(windowID: moveWindowID, targetSpaceID: moveTargetSpaceID)
+        try spaceManager.moveWindowToSpace(
+          windowID: moveWindowID, targetSpaceID: moveTargetSpaceID,
+          activateAfterMove: activateAfterMove)
       } catch {
         print("Failed to move window \(moveWindowID) to space \(moveTargetSpaceID): \(error)")
       }
@@ -1346,10 +1353,12 @@ public final class SwitcherViewModel: ObservableObject {
 
     guard targetDisplayUUID != originDisplayUUID else { return false }
 
+    let activateAfterMove = activateMovedItem
     DispatchQueue.global(qos: .userInteractive).async { [spaceManager] in
       do {
         try spaceManager.moveSpaceToDisplay(
-          spaceID: spaceID, targetDisplayUUID: targetDisplayUUID)
+          spaceID: spaceID, targetDisplayUUID: targetDisplayUUID,
+          activateAfterMove: activateAfterMove)
       } catch {
         print("Failed to move space \(spaceID) to display \(targetDisplayUUID): \(error)")
       }

@@ -1738,7 +1738,9 @@ public class SpaceManager {
   /// - Throws: `WindowActivationError` if the window can't be found or activated.
   /// - Returns: `true` if the drag completed successfully.
   @discardableResult
-  public func moveWindowToSpace(windowID: Int, targetSpaceID: UInt64) throws -> Bool {
+  public func moveWindowToSpace(
+    windowID: Int, targetSpaceID: UInt64, activateAfterMove: Bool = true
+  ) throws -> Bool {
     let token = Diagnostics.beginTiming(
       "move-space", "moveWindowToSpace",
       extras: ["windowID": "\(windowID)", "targetSpace": "\(targetSpaceID)"])
@@ -1785,6 +1787,19 @@ public class SpaceManager {
     let currentSpaceIDs = Set(allSpaces.filter(\.isCurrent).map(\.id))
     let sourceSpaceIDs = dataSource.fetchSpacesForWindow(windowID)
     let needsSpaceSwitch = !sourceSpaceIDs.contains(where: { currentSpaceIDs.contains($0) })
+
+    // For a no-activate move, remember the Space that was current on the
+    // window's display before we switch away to grab it, so the user's view
+    // can be restored afterwards.
+    let originalCurrentSpaceID: UInt64? = {
+      guard !activateAfterMove && needsSpaceSwitch else { return nil }
+      guard
+        let sourceSpace = allSpaces.first(where: { sourceSpaceIDs.contains($0.id) })
+      else { return nil }
+      return allSpaces.first(where: { $0.isCurrent && $0.displayUUID == sourceSpace.displayUUID })?
+        .id
+    }()
+
     try activateWindow(id: windowID)
 
     // 4. Wait for the space switch animation to complete.
@@ -1795,12 +1810,24 @@ public class SpaceManager {
     let targetScreenNumber = Self.displayIDForUUID(targetSpace.displayUUID)
     let moved = moveWindowInMC(
       windowTitle: windowTitle, targetSpaceTitle: targetSpaceTitle,
-      targetScreenNumber: targetScreenNumber)
+      targetScreenNumber: targetScreenNumber, switchToTarget: activateAfterMove)
 
-    // 6. Activate the window again so it's in front on the target space.
     if moved {
-      Thread.sleep(forTimeInterval: 0.3)
-      try activateWindow(id: windowID)
+      if activateAfterMove {
+        // 6. Activate the window again so it's in front on the target space.
+        Thread.sleep(forTimeInterval: 0.3)
+        try activateWindow(id: windowID)
+      } else if let originalCurrentSpaceID {
+        // 6b. No-activate: put the user back on the Space they were viewing
+        // before the move switched away to grab the window. Best-effort —
+        // the move itself already succeeded.
+        Thread.sleep(forTimeInterval: 0.3)
+        do {
+          try switchToSpace(id: originalCurrentSpaceID)
+        } catch {
+          Diagnostics.log("move-space", "restore of original space failed: \(error)")
+        }
+      }
     }
 
     Diagnostics.endTiming(token, outcome: moved ? "moved" : "drag-failed")
@@ -1818,11 +1845,15 @@ public class SpaceManager {
   ///   - targetSpaceTitle: Exact title of the target space (e.g., "Desktop 2").
   ///   - targetScreenNumber: Screen number of the display containing the target space.
   ///   - verbose: Print diagnostic output.
+  ///   - switchToTarget: When true (default), the target space button is pressed
+  ///     after the drop, switching to it (and dismissing MC). When false, MC is
+  ///     dismissed without a press so the current Space stays put.
   /// - Returns: `true` if the drag completed, `false` on any error.
   @discardableResult
   public func moveWindowInMC(
     windowTitle: String, targetSpaceTitle: String,
-    targetScreenNumber: CGDirectDisplayID? = nil, verbose: Bool = false
+    targetScreenNumber: CGDirectDisplayID? = nil, verbose: Bool = false,
+    switchToTarget: Bool = true
   ) -> Bool {
     guard AXIsProcessTrusted() else {
       print("moveWindowInMC: Accessibility not trusted")
@@ -2005,9 +2036,14 @@ public class SpaceManager {
       Thread.sleep(forTimeInterval: 0.05)
       Self.postMouseUp(at: dropPoint)
 
-      // Click the target space to switch to it (also dismisses MC)
       Thread.sleep(forTimeInterval: 0.3)
-      AXUIElementPerformAction(targetButton, kAXPressAction as CFString)
+      if switchToTarget {
+        // Click the target space to switch to it (also dismisses MC)
+        AXUIElementPerformAction(targetButton, kAXPressAction as CFString)
+      } else {
+        // Leave the current Space as-is; just close Mission Control.
+        Self.dismissMissionControl()
+      }
       success = true
     }
 
@@ -2027,13 +2063,16 @@ public class SpaceManager {
   /// display, a sibling is created there first — a display must always retain
   /// at least one space.
   ///
-  /// The moved space is deliberately NOT switched to afterwards: this is layout
-  /// surgery, and both displays keep their current spaces.
+  /// By default the moved space is switched to after the move, making it the
+  /// target display's active Space. Pass `activateAfterMove: false` for pure
+  /// layout surgery that leaves both displays' current spaces unchanged.
   ///
   /// - Returns: `true` when CGS confirms the space now lives on the target display.
   /// - Throws: `SpaceMoveError` for any resolvable precondition failure.
   @discardableResult
-  public func moveSpaceToDisplay(spaceID: UInt64, targetDisplayUUID: String) throws -> Bool {
+  public func moveSpaceToDisplay(
+    spaceID: UInt64, targetDisplayUUID: String, activateAfterMove: Bool = true
+  ) throws -> Bool {
     let token = Diagnostics.beginTiming(
       "move-space-display", "moveSpaceToDisplay",
       extras: ["spaceID": "\(spaceID)", "targetDisplay": targetDisplayUUID])
@@ -2141,6 +2180,17 @@ public class SpaceManager {
     let verified = poll(timeout: 2.0) {
       self.getAllSpaces().first(where: { $0.id == spaceID })?.displayUUID == targetDisplayUUID
     }
+
+    // Make the moved space the target display's active Space. Best-effort:
+    // the move itself already succeeded, so a failed switch only logs.
+    if verified && activateAfterMove {
+      do {
+        try switchToSpace(id: spaceID)
+      } catch {
+        Diagnostics.log("move-space-display", "post-move activation failed: \(error)")
+      }
+    }
+
     Diagnostics.endTiming(token, outcome: verified ? "moved" : "not-verified")
     return verified
   }

@@ -272,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     viewModel.overrideDisplayUUID = nil
     viewModel.showEmptySpaces = appSettings.showEmptySpaces
     viewModel.warpCursorOnActivation = appSettings.warpCursorOnActivation
+    viewModel.activateMovedItem = appSettings.activateMovedItem
 
     let multiPanel = isMultiPanelPerDisplay
     let screens = targetScreens()

@@ -13,6 +13,9 @@ struct MoveSpaceCommand: ParsableCommand {
   @Argument(help: "Target display: name substring, UUID, or 1-based ordinal")
   var display: String
 
+  @Flag(name: .customLong("no-activate"), help: "Don't switch to the moved space after the move")
+  var noActivate = false
+
   func run() throws {
     let manager = SpaceManager()
     let spaceNameStore = SpaceNameStore()
@@ -55,7 +58,8 @@ struct MoveSpaceCommand: ParsableCommand {
       throw ExitCode.failure
     }
 
-    let ok = try manager.moveSpaceToDisplay(spaceID: spaceID, targetDisplayUUID: targetDisplayUUID)
+    let ok = try manager.moveSpaceToDisplay(
+      spaceID: spaceID, targetDisplayUUID: targetDisplayUUID, activateAfterMove: !noActivate)
     guard ok else {
       print("Move failed.")
       throw ExitCode.failure

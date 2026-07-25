@@ -40,6 +40,17 @@ struct GeneralPane: View {
         .foregroundStyle(.secondary)
       }
 
+      Section {
+        Toggle(
+          "Activate moved windows and Spaces",
+          isOn: $settings.activateMovedItem)
+        Text(
+          "After moving a window to another Space or a Space to another display, switch to it and bring it to front. Turn off to keep your current view unchanged while moving things."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+
       Section("Import & Export") {
         HStack(spacing: 12) {
           Button("Export Settings...") {

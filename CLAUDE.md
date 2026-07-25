@@ -163,7 +163,7 @@ Native CGS/SkyLight move APIs (`SLSMoveWindowsToManagedSpace`, `CGSAddWindowsToS
 2. If the space is its display's **only** desktop space, a sibling is created there first (`createSpace` on that display, identified by UUID diff), then re-planned — a display must always retain ≥1 space
 3. If the space is **current** on its display, `switchToSpace` moves the display off it first (MC refuses to drag the active Space), verified by polling CGS `isCurrent` — never a blind sleep
 4. `moveSpaceInMC` — hover the source bar first (`postMouseMove` + `awaitStablePoint`) so it expands: tile AX frames are stale until expansion settles. Grab, nudge **downward** out of the bar (in-bar motion reads as reordering), then `homingDrag` toward the **center of the destination bar's frame**
-5. Dwell ~0.6s over the bar (stationary drag events keep the session alive), drop, wait ~0.5s for MC to commit, then dismiss MC **without pressing any tile** — a tile press would switch the destination display's active Space. The move deliberately leaves both displays' current Spaces unchanged
+5. Dwell ~0.6s over the bar (stationary drag events keep the session alive), drop, wait ~0.5s for MC to commit, then dismiss MC **without pressing any tile** — a tile press mid-flow would switch the destination display's active Space before verification. By default (`activateAfterMove: true`, GUI setting "Activate moved windows and Spaces", CLI `--no-activate` to disable) the moved space is then switched to via `switchToSpace(id:)` after CGS verification, making it the target display's active Space; with activation off the move leaves both displays' current Spaces unchanged
 6. Verified by polling `getAllSpaces()` until the space's `displayUUID` matches the target
 
 **Key details:**
