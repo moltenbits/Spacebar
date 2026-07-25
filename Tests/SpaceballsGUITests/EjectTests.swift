@@ -85,6 +85,15 @@ struct EjectPlannerTests {
     #expect(plan.moves.map(\.spaceID) == [3])
   }
 
+  @Test("The active space of each ejecting display is captured")
+  func activeSpacesCaptured() {
+    let (spaces, names) = makeEjectScenario()
+    let plan = EjectPlanner.plan(spaces: spaces, targetDisplayUUID: "b", names: names)
+    // d1's active space is "Work" (u3), d2's is u5 — captured so restore can
+    // reactivate them. The built-in display is never captured.
+    #expect(plan.activeSpaceByDisplay == ["d1": "u3", "d2": "u5"])
+  }
+
   @Test("A display holding only its Default Space contributes nothing")
   func defaultOnlyDisplayContributesNothing() {
     let spaces = [
@@ -220,5 +229,20 @@ struct EjectStoreTests {
     // start unarmed — the display has to go away again before auto-restore.
     store.recordEjection(spaceUUID: "u3", originalDisplayUUID: "d1")
     #expect(store.armedEjections().isEmpty)
+  }
+
+  @Test("Active-space records round-trip, overwrite per display, and clear")
+  func activeSpaceRecordsRoundTrip() {
+    let (store, _) = makeStore()
+    store.recordActiveSpace(displayUUID: "d1", spaceUUID: "u3")
+    store.recordActiveSpace(displayUUID: "d2", spaceUUID: "u5")
+    #expect(store.activeSpaceRecords() == ["d1": "u3", "d2": "u5"])
+
+    // A later eject overwrites per display, leaving other displays' records.
+    store.recordActiveSpace(displayUUID: "d1", spaceUUID: "u4")
+    #expect(store.activeSpaceRecords() == ["d1": "u4", "d2": "u5"])
+
+    store.clearActiveSpace(displayUUID: "d1")
+    #expect(store.activeSpaceRecords() == ["d2": "u5"])
   }
 }

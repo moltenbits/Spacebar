@@ -11,6 +11,12 @@ public protocol EjectRecordStoring {
   /// undo an eject whose displays never went away.
   func armedEjections() -> Set<String>
   func armEjections(spaceUUIDs: [String])
+  /// Which space was active on each display at eject time (display UUID →
+  /// space UUID), captured before the pre-switch onto the Default Space so
+  /// restore can reactivate it.
+  func recordActiveSpace(displayUUID: String, spaceUUID: String)
+  func activeSpaceRecords() -> [String: String]
+  func clearActiveSpace(displayUUID: String)
 }
 
 // MARK: - UserDefaults Implementation
@@ -23,6 +29,7 @@ public protocol EjectRecordStoring {
 public final class EjectStore: EjectRecordStoring {
   private static let key = "ejectedSpaces"
   private static let armedKey = "armedEjectedSpaces"
+  private static let activeSpacesKey = "ejectedActiveSpaces"
   private let defaults: UserDefaults
 
   public init(defaults: UserDefaults = UserDefaults(suiteName: "com.moltenbits.spaceballs.shared")!)
@@ -64,5 +71,21 @@ public final class EjectStore: EjectRecordStoring {
     let armed = armedEjections()
     guard armed.contains(spaceUUID) else { return }
     defaults.set(Array(armed.subtracting([spaceUUID])).sorted(), forKey: Self.armedKey)
+  }
+
+  public func recordActiveSpace(displayUUID: String, spaceUUID: String) {
+    var records = activeSpaceRecords()
+    records[displayUUID] = spaceUUID
+    defaults.set(records, forKey: Self.activeSpacesKey)
+  }
+
+  public func activeSpaceRecords() -> [String: String] {
+    defaults.dictionary(forKey: Self.activeSpacesKey) as? [String: String] ?? [:]
+  }
+
+  public func clearActiveSpace(displayUUID: String) {
+    var records = activeSpaceRecords()
+    records.removeValue(forKey: displayUUID)
+    defaults.set(records, forKey: Self.activeSpacesKey)
   }
 }

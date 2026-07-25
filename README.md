@@ -209,7 +209,9 @@ Spaceballs automatically moves the ejected Spaces back where they came from. Aut
 record**: it only fires for Spaces whose display was actually observed absent after the eject, so ejecting
 and continuing to work with the displays attached can't be undone by a stray display event (sleep/wake,
 resolution changes). **Cmd+Shift+E** (or `spaceballs restore`) restores everything movable on demand,
-armed or not.
+armed or not. Each display's active Space at eject time is also captured, and once its Space is back home a
+restore reactivates it — the Space you were standing on before the eject is the one you're standing on after
+the restore.
 
 ### Resizing Windows
 

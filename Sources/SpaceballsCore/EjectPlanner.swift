@@ -40,6 +40,10 @@ public enum EjectPlanner {
     public let displaysNeedingDefault: [String]
     public let preSwitches: [PreSwitch]
     public let moves: [Move]
+    /// Which space is active on each ejecting display right now (display
+    /// UUID → space UUID), captured so restore can reactivate it after the
+    /// spaces are back.
+    public let activeSpaceByDisplay: [String: String]
   }
 
   /// Plans moving every non-Default desktop space off every display except
@@ -50,6 +54,7 @@ public enum EjectPlanner {
     var displaysNeedingDefault: [String] = []
     var preSwitches: [PreSwitch] = []
     var moves: [Move] = []
+    var activeSpaceByDisplay: [String: String] = [:]
 
     for (displayUUID, desktops) in desktopsByDisplay(spaces)
     where displayUUID != targetDisplayUUID {
@@ -58,6 +63,10 @@ public enum EjectPlanner {
       }
       let ejectables = desktops.enumerated().filter { !isDefault($0.element) }
       guard !ejectables.isEmpty else { continue }
+
+      if let active = desktops.first(where: \.isCurrent) {
+        activeSpaceByDisplay[displayUUID] = active.uuid
+      }
 
       let defaultIndex = desktops.firstIndex(where: isDefault)
       if defaultIndex == nil {
@@ -80,7 +89,8 @@ public enum EjectPlanner {
 
     return Plan(
       displaysNeedingDefault: displaysNeedingDefault,
-      preSwitches: preSwitches, moves: moves)
+      preSwitches: preSwitches, moves: moves,
+      activeSpaceByDisplay: activeSpaceByDisplay)
   }
 
   /// Desktop spaces grouped per display, preserving CGS enumeration order

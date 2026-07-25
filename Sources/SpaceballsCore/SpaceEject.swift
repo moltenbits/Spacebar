@@ -73,6 +73,12 @@ extension SpaceManager {
       }
     }
 
+    // Capture each ejecting display's active space BEFORE the pre-switches
+    // park it on its Default Space — restore reactivates it at the end.
+    for (displayUUID, spaceUUID) in plan.activeSpaceByDisplay {
+      ejectStore.recordActiveSpace(displayUUID: displayUUID, spaceUUID: spaceUUID)
+    }
+
     let verified = executePlannedMoves(preSwitches: plan.preSwitches, moves: plan.moves)
     for move in verified {
       ejectStore.recordEjection(
@@ -118,6 +124,9 @@ extension SpaceManager {
     for move in restored {
       ejectStore.clearEjection(spaceUUID: move.spaceUUID)
     }
+
+    reactivateRecordedActiveSpaces(ejectStore: ejectStore)
+
     let summary = SpaceRestoreSummary(restored: restored.map(\.spaceUUID), waiting: plan.waiting)
     Diagnostics.endTiming(
       token, outcome: "restored=\(summary.restored.count) waiting=\(summary.waiting.count)")
@@ -200,6 +209,40 @@ extension SpaceManager {
     return moves.filter { move in
       finalSpaces.first(where: { $0.id == move.spaceID })?.displayUUID
         == move.targetDisplayUUID
+    }
+  }
+
+  /// Reactivates the space that was active on each display at eject time,
+  /// once that space is back home. switchToSpace presses a Mission Control
+  /// tile (and the awake that opens MC is a toggle), so reactivations run
+  /// strictly one at a time, each waited out until MC is fully gone.
+  /// Records for spaces that no longer exist are dropped; records whose
+  /// space or display isn't back yet are kept for a later restore.
+  private func reactivateRecordedActiveSpaces(ejectStore: EjectRecordStoring) {
+    let records = ejectStore.activeSpaceRecords()
+    guard !records.isEmpty else { return }
+    let spaces = getAllSpaces()
+    let connectedDisplays = Set(spaces.map(\.displayUUID))
+
+    for (displayUUID, spaceUUID) in records {
+      guard let space = spaces.first(where: { $0.uuid == spaceUUID }) else {
+        ejectStore.clearActiveSpace(displayUUID: displayUUID)
+        continue
+      }
+      guard connectedDisplays.contains(displayUUID),
+        space.displayUUID == displayUUID
+      else { continue }
+
+      if !space.isCurrent {
+        do {
+          try switchToSpace(id: space.id)
+        } catch {
+          Diagnostics.log("eject", "reactivating \(spaceUUID) on \(displayUUID) failed: \(error)")
+        }
+        Self.awaitMissionControlDismissed(timeout: 2.0)
+        Thread.sleep(forTimeInterval: 0.8)
+      }
+      ejectStore.clearActiveSpace(displayUUID: displayUUID)
     }
   }
 
