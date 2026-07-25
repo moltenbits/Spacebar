@@ -41,24 +41,42 @@ public struct DisplayArrangement: Equatable {
     let ox = origin.frame.midX
     let oy = origin.frame.midY
 
-    var best: (uuid: String, score: CGFloat)?
+    var best: (uuid: String, clearsEdge: Bool, score: CGFloat)?
     for candidate in displays where candidate.uuid != uuid {
-      let dx = candidate.frame.midX - ox
-      let dy = candidate.frame.midY - oy
+      let cx = candidate.frame.midX
+      let cy = candidate.frame.midY
 
       // Axial component must point in the requested direction (y-up coords).
       let (axial, perpendicular): (CGFloat, CGFloat) =
         switch direction {
-        case .right: (dx, dy)
-        case .left: (-dx, dy)
-        case .up: (dy, dx)
-        case .down: (-dy, dx)
+        case .right: (cx - ox, cy - oy)
+        case .left: (ox - cx, cy - oy)
+        case .up: (cy - oy, cx - ox)
+        case .down: (oy - cy, cx - ox)
         }
       guard axial > 0 else { continue }
 
+      // Two tiers: a candidate whose center clears the origin's far EDGE is
+      // squarely in the direction and always beats one that is merely
+      // center-of-center offset — a display sitting almost directly above,
+      // nudged a few points sideways, must not shadow a display genuinely
+      // beside the origin. The center-offset tier remains as a fallback so
+      // diagonal-only neighbors stay reachable.
+      let clearsEdge: Bool =
+        switch direction {
+        case .right: cx > origin.frame.maxX
+        case .left: cx < origin.frame.minX
+        case .up: cy > origin.frame.maxY
+        case .down: cy < origin.frame.minY
+        }
+
       let score = axial + Self.perpendicularPenalty * abs(perpendicular)
-      if best == nil || score < best!.score {
-        best = (candidate.uuid, score)
+      let beatsBest =
+        best == nil
+        || (clearsEdge && !best!.clearsEdge)
+        || (clearsEdge == best!.clearsEdge && score < best!.score)
+      if beatsBest {
+        best = (candidate.uuid, clearsEdge, score)
       }
     }
     return best?.uuid
