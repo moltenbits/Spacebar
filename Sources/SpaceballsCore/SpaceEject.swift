@@ -171,8 +171,15 @@ extension SpaceManager {
     // each verified via CGS and waited out until Mission Control is fully
     // gone, before the next switch (or the drag session) opens MC again.
     for preSwitch in preSwitches {
-      guard let screen = Self.displayIDForUUID(preSwitch.displayUUID) else { continue }
-      switchToSpace(spaceIndex: preSwitch.toSpaceIndex, screenNumber: screen)
+      // The same activation the switcher panel uses: a window on the target
+      // Space carries the switch with it — no Mission Control round at all.
+      // Only an empty Space needs the Dock's MC interface.
+      do {
+        try activateSpace(id: preSwitch.toSpaceID)
+      } catch {
+        Diagnostics.log(
+          "eject", "pre-switch activation of \(preSwitch.toSpaceID) failed: \(error)")
+      }
       let switched = poll(interval: 0.05, timeout: 3.0) {
         self.getAllSpaces().first(where: {
           $0.displayUUID == preSwitch.displayUUID && $0.isCurrent
@@ -260,7 +267,7 @@ extension SpaceManager {
 
       if !space.isCurrent {
         do {
-          try switchToSpace(id: space.id)
+          try activateSpace(id: space.id)
         } catch {
           Diagnostics.log("eject", "reactivating \(spaceUUID) on \(displayUUID) failed: \(error)")
         }

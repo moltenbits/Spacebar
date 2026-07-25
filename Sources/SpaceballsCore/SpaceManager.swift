@@ -475,6 +475,34 @@ public class SpaceManager {
     switchToSpace(spaceIndex: spaceIndex, screenNumber: screenNumber)
   }
 
+  /// The frontmost enumerated window on a Space, if any — drawn from the
+  /// same filtered window set the switcher panel displays (exclusions and
+  /// helper-window rules applied).
+  public func frontWindow(onSpace spaceID: UInt64) -> WindowInfo? {
+    getAllWindows().first { $0.spaceIDs.contains(spaceID) }
+  }
+
+  /// Activates a Space the way the switcher panel does: by activating a
+  /// window on it when one exists — a plain window activation carries the
+  /// space switch with it, no Mission Control involved — and only falling
+  /// back to the Dock's Mission Control interface for empty Spaces.
+  /// Returns true when the fast windowed path succeeded.
+  @discardableResult
+  public func activateSpace(id spaceID: UInt64) throws -> Bool {
+    if let window = frontWindow(onSpace: spaceID) {
+      do {
+        try activateWindow(id: window.id)
+        return true
+      } catch {
+        Diagnostics.log(
+          "space-switch",
+          "window activation for space \(spaceID) failed (\(error)); using Mission Control")
+      }
+    }
+    try switchToSpace(id: spaceID)
+    return false
+  }
+
   // MARK: - High-Level Space Operations
 
   /// Creates missing spaces from a list of default names, pruning stale
@@ -2184,7 +2212,11 @@ public class SpaceManager {
       Diagnostics.log(
         "move-space-display",
         "pre-switch display \(plan.sourceDisplayUUID) to space \(preSwitch.toSpaceID)")
-      switchToSpace(spaceIndex: preSwitch.spaceIndex, screenNumber: sourceScreen)
+      do {
+        try activateSpace(id: preSwitch.toSpaceID)
+      } catch {
+        Diagnostics.log("move-space-display", "pre-switch activation failed: \(error)")
+      }
       let switched = poll(timeout: 3.0) {
         self.getAllSpaces().first(where: { $0.id == spaceID })?.isCurrent == false
       }
@@ -2211,11 +2243,12 @@ public class SpaceManager {
       self.getAllSpaces().first(where: { $0.id == spaceID })?.displayUUID == targetDisplayUUID
     }
 
-    // Make the moved space the target display's active Space. Best-effort:
+    // Make the moved space the target display's active Space (activating a
+    // window on it when it has one — no Mission Control round). Best-effort:
     // the move itself already succeeded, so a failed switch only logs.
     if verified && activateAfterMove {
       do {
-        try switchToSpace(id: spaceID)
+        try activateSpace(id: spaceID)
       } catch {
         Diagnostics.log("move-space-display", "post-move activation failed: \(error)")
       }

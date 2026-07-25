@@ -11,15 +11,12 @@ public enum EjectPlanner {
 
   public struct PreSwitch: Equatable {
     public let displayUUID: String
-    /// Index among the display's desktop spaces to switch to before dragging
-    /// (MC refuses to drag a display's current space).
-    public let toSpaceIndex: Int
-    /// ID of that space, for verifying via CGS that the switch landed.
+    /// Space to activate before dragging (MC refuses to drag a display's
+    /// current space); also used to verify via CGS that the switch landed.
     public let toSpaceID: UInt64
 
-    public init(displayUUID: String, toSpaceIndex: Int, toSpaceID: UInt64) {
+    public init(displayUUID: String, toSpaceID: UInt64) {
       self.displayUUID = displayUUID
-      self.toSpaceIndex = toSpaceIndex
       self.toSpaceID = toSpaceID
     }
   }
@@ -73,9 +70,7 @@ public enum EjectPlanner {
         displaysNeedingDefault.append(displayUUID)
       } else if let defaultIndex, ejectables.contains(where: { $0.element.isCurrent }) {
         preSwitches.append(
-          PreSwitch(
-            displayUUID: displayUUID, toSpaceIndex: defaultIndex,
-            toSpaceID: desktops[defaultIndex].id))
+          PreSwitch(displayUUID: displayUUID, toSpaceID: desktops[defaultIndex].id))
       }
 
       moves.append(
@@ -159,9 +154,7 @@ public enum RestorePlanner {
         })
       {
         preSwitches.append(
-          EjectPlanner.PreSwitch(
-            displayUUID: displayUUID, toSpaceIndex: staying.offset,
-            toSpaceID: staying.element.id))
+          EjectPlanner.PreSwitch(displayUUID: displayUUID, toSpaceID: staying.element.id))
       }
 
       moves.append(

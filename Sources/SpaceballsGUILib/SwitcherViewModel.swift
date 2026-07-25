@@ -1144,20 +1144,18 @@ public final class SwitcherViewModel: ObservableObject {
         // Activate the first window in this space to trigger space switch
         windowID = firstWindow.id
       } else {
-        // Empty space — switch via Dock accessibility (Mission Control).
+        // Empty space — activateSpace falls back to the Dock's Mission
+        // Control interface (the shared path eject/restore use too).
         // Stamp the space MRU directly: focus-based inference in refresh()
         // can't see this switch — an empty space has no window to move
         // keyboard focus to its display.
         spaceMRUHistory.removeAll { $0 == spaceID }
         spaceMRUHistory.insert(spaceID, at: 0)
-        let allSpaces = spaceManager.getAllSpaces()
-        let displaySpaces = allSpaces.filter { $0.displayUUID == section.displayUUID }
-          .filter { $0.type == .desktop }
-        guard let spaceIndex = displaySpaces.firstIndex(where: { $0.id == spaceID }) else {
-          return
+        do {
+          try spaceManager.activateSpace(id: spaceID)
+        } catch {
+          print("Failed to activate space \(spaceID): \(error)")
         }
-        guard let screenNumber = SpaceManager.displayIDForUUID(section.displayUUID) else { return }
-        spaceManager.switchToSpace(spaceIndex: spaceIndex, screenNumber: screenNumber)
         return
       }
     case .spaces, .settings, nil:

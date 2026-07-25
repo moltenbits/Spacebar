@@ -68,7 +68,7 @@ struct EjectPlannerTests {
     // Space sits at index 0. d2 has no default yet, so no pre-switch there.
     #expect(
       plan.preSwitches == [
-        EjectPlanner.PreSwitch(displayUUID: "d1", toSpaceIndex: 0, toSpaceID: 2)
+        EjectPlanner.PreSwitch(displayUUID: "d1", toSpaceID: 2)
       ])
   }
 
@@ -170,7 +170,7 @@ struct RestorePlannerTests {
     // display to its first non-restored desktop (space 1, index 0) first.
     #expect(
       plan.preSwitches == [
-        EjectPlanner.PreSwitch(displayUUID: "b", toSpaceIndex: 0, toSpaceID: 1)
+        EjectPlanner.PreSwitch(displayUUID: "b", toSpaceID: 1)
       ])
   }
 }
