@@ -485,8 +485,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       })
   }
 
-  /// Moves the selection to the display physically in `direction`; no-op
-  /// when there is none in that direction.
+  /// Moves the selection to the display physically in `direction`, wrapping
+  /// past the far edge; no-op when no display lies on that axis.
   private func navigateDisplay(_ direction: ArrangementDirection) {
     // Never touch panel content while a move is pending — refresh() would wipe
     // the visual relocation and the marked item's context (issue #18). The
@@ -501,7 +501,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       ? (viewModel.activeDisplayUUID ?? viewModel.displayOrder.first)
       : currentPanelDisplayUUID
     guard let currentUUID,
-      let targetUUID = Self.currentArrangement().neighborUUID(
+      let targetUUID = Self.currentArrangement().wrappedNeighborUUID(
         of: currentUUID, direction: direction)
     else { return }
     focusDisplay(uuid: targetUUID)

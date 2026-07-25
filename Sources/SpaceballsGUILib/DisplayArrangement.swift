@@ -81,4 +81,32 @@ public struct DisplayArrangement: Equatable {
     }
     return best?.uuid
   }
+
+  /// Like `neighborUUID`, but wraps at the far edge: when nothing lies in
+  /// `direction`, returns the display at the FAR end of the opposite
+  /// direction — the one repeated presses the other way would end on, so
+  /// wrapping always agrees with the chain the arrows walk. Returns nil when
+  /// no other display lies on that axis at all (an ↑ on a purely
+  /// side-by-side layout stays inert rather than wrapping onto a sibling).
+  public func wrappedNeighborUUID(of uuid: String, direction: ArrangementDirection) -> String? {
+    if let neighbor = neighborUUID(of: uuid, direction: direction) { return neighbor }
+
+    let opposite: ArrangementDirection =
+      switch direction {
+      case .up: .down
+      case .down: .up
+      case .left: .right
+      case .right: .left
+      }
+    // Centers are strictly ordered along the axis, so the walk cannot cycle;
+    // the visited set is a backstop against scoring pathologies.
+    var visited: Set<String> = [uuid]
+    var current = uuid
+    while let next = neighborUUID(of: current, direction: opposite),
+      visited.insert(next).inserted
+    {
+      current = next
+    }
+    return current == uuid ? nil : current
+  }
 }

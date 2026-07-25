@@ -755,15 +755,15 @@ public final class SwitcherViewModel: ObservableObject {
   /// First selectable item of the display reached by walking the physical
   /// arrangement in `direction`. Entering downward lands on that display's
   /// first space, entering upward on its last — the spatially nearest end.
-  /// Walks past displays with no visible sections; nil when nothing lies
-  /// in that direction.
+  /// Walks past displays with no visible sections and wraps past the far
+  /// edge; nil when no display lies on that axis at all.
   private func verticalNeighborEntry(
     from displayUUID: String, direction: ArrangementDirection
   ) -> SelectedItem? {
     guard let arrangement = displayArrangement else { return nil }
     var visited: Set<String> = [displayUUID]
     var current = displayUUID
-    while let next = arrangement.neighborUUID(of: current, direction: direction),
+    while let next = arrangement.wrappedNeighborUUID(of: current, direction: direction),
       !visited.contains(next)
     {
       visited.insert(next)
@@ -814,7 +814,8 @@ public final class SwitcherViewModel: ObservableObject {
     // Mode 3 with a known arrangement: at a display's last space, ↓ continues
     // onto the display physically BELOW, entering at its first space — the
     // crossing follows the arrangement, not displayOrder (which is MRU-led).
-    // No display below is a no-op.
+    // Past the bottom display it wraps to the top; no vertical axis at all
+    // is a no-op.
     if !displayOrder.isEmpty, displayArrangement != nil, let currentSpace,
       let currentSection = filteredSections.first(where: { $0.id == currentSpace }),
       filteredSections.last(where: { $0.displayUUID == currentSection.displayUUID })?.id
@@ -911,8 +912,8 @@ public final class SwitcherViewModel: ObservableObject {
     let currentSpace = spaceID(for: current, using: map)
 
     // Mode 3 with a known arrangement: at a display's first space, ↑ continues
-    // onto the display physically ABOVE, entering at its last space.
-    // No display above is a no-op.
+    // onto the display physically ABOVE, entering at its last space. Past the
+    // top display it wraps to the bottom; no vertical axis at all is a no-op.
     if !displayOrder.isEmpty, displayArrangement != nil, let currentSpace,
       let currentSection = filteredSections.first(where: { $0.id == currentSpace }),
       filteredSections.first(where: { $0.displayUUID == currentSection.displayUUID })?.id
@@ -1238,9 +1239,9 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   /// Moves the marked window row toward the display in `direction` on the
-  /// physical arrangement. No-op when the arrangement has no display there
-  /// (or it has no visible section to receive the row); falls back to
-  /// cycling when no arrangement is available.
+  /// physical arrangement, wrapping past the far edge. No-op when no display
+  /// lies on that axis (or the target has no visible section to receive the
+  /// row); falls back to cycling when no arrangement is available.
   public func moveMarkedWindow(inDirection direction: ArrangementDirection) {
     guard moveMode, let windowID = markedWindowID,
       let sourceIdx = sections.firstIndex(where: {
@@ -1255,7 +1256,7 @@ public final class SwitcherViewModel: ObservableObject {
     }
 
     guard
-      let targetUUID = arrangement.neighborUUID(
+      let targetUUID = arrangement.wrappedNeighborUUID(
         of: sections[sourceIdx].displayUUID, direction: direction),
       let targetIdx = sections.firstIndex(where: { $0.displayUUID == targetUUID })
     else { return }
@@ -1467,8 +1468,9 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   /// Retargets the marked space toward the display in `direction` on the
-  /// physical arrangement. No-op when the arrangement has no display there;
-  /// falls back to cycling when no arrangement is available.
+  /// physical arrangement, wrapping past the far edge. No-op when no display
+  /// lies on that axis; falls back to cycling when no arrangement is
+  /// available.
   public func moveMarkedSpace(inDirection direction: ArrangementDirection) {
     guard spaceMoveMode, let spaceID = markedSpaceID,
       let sectionIndex = sections.firstIndex(where: { $0.id == spaceID })
@@ -1480,7 +1482,7 @@ public final class SwitcherViewModel: ObservableObject {
     }
 
     guard
-      let targetUUID = arrangement.neighborUUID(
+      let targetUUID = arrangement.wrappedNeighborUUID(
         of: sections[sectionIndex].displayUUID, direction: direction),
       let target = spaceMoveDisplays.first(where: { $0.uuid == targetUUID })
     else { return }

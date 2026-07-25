@@ -117,24 +117,24 @@ struct VerticalSpaceNavigationTests {
     #expect(vm.selectedItem == firstItem(of: upper[upper.count - 1]))
   }
 
-  @Test("Down with no display below is a no-op")
-  func downAtBottomIsNoOp() {
-    let vm = makeViewModel(arranged: true)
-    let lower = sections(vm, on: "display-lower")
-    let start = firstItem(of: lower[lower.count - 1])
-    vm.selectedItem = start
-    vm.moveToNextSpace()
-    #expect(vm.selectedItem == start)
-  }
-
-  @Test("Up with no display above is a no-op")
-  func upAtTopIsNoOp() {
+  @Test("Down from the bottom display's last space wraps to the top display's first")
+  func downAtBottomWrapsToTop() {
     let vm = makeViewModel(arranged: true)
     let upper = sections(vm, on: "display-upper")
-    let start = firstItem(of: upper[0])
-    vm.selectedItem = start
+    let lower = sections(vm, on: "display-lower")
+    vm.selectedItem = firstItem(of: lower[lower.count - 1])
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == firstItem(of: upper[0]))
+  }
+
+  @Test("Up from the top display's first space wraps to the bottom display's last")
+  func upAtTopWrapsToBottom() {
+    let vm = makeViewModel(arranged: true)
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+    vm.selectedItem = firstItem(of: upper[0])
     vm.moveToPreviousSpace()
-    #expect(vm.selectedItem == start)
+    #expect(vm.selectedItem == firstItem(of: lower[lower.count - 1]))
   }
 
   @Test("Without an arrangement, group-boundary stops behave as before")
