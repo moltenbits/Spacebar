@@ -55,6 +55,30 @@ see what I could vibe-code one Sunday. Having never touched a line of Swift code
 at what I was able to come up with in a single day. Now here we are, and I continue to add features that I feel
 perfectly compliment users who make heavy use of AI tooling to work on many projects at once.
 
+And "nearly useless" is not hyperbole. A non-exhaustive list of the bugs and design failures Apple Spaces suffers
+from, every one of them verified the hard way while building Spaceballs:
+
+- **Spaces can't be named.** The "Desktop 1", "Desktop 2" labels aren't stored anywhere — they're generated at
+  runtime from ordinal position. Rearrange your Spaces and every label silently changes meaning. There is no API,
+  no AppleScript, no anything to read or set a Space name.
+- **"Desktop N" numbering isn't even stable.** Mission Control numbers desktops in display-arrangement order,
+  while the underlying enumeration order can vary from one call to the next — so the same desktop can be
+  "Desktop 3" in one context and not in another.
+- **There is no sanctioned way to move a window to another Space.** The internal APIs that could do it were locked
+  down in macOS 14.5 so that only the Dock itself may call them. The only supported method is manually dragging
+  window thumbnails in Mission Control, one at a time, forever.
+- **Disconnecting a display scrambles your windows.** macOS evacuates the departed display's Spaces and dumps
+  windows onto whatever Space it feels like; reconnecting the display does not put anything back. This has been
+  broken for years and has arguably gotten worse in recent macOS releases.
+- **New windows can't be opened on the current Space.** Launching or activating an app yanks you to whichever
+  Space the app already lives on (or opens the window over there). There is no API to say "new window, right
+  here."
+- **The window server reports ghost windows.** Closed windows can linger in the window list indefinitely, so
+  anything that trusts it (like a window switcher) shows windows that no longer exist. Only a slow round-trip
+  through Accessibility reveals the truth.
+- **The built-in Cmd+Tab switcher is Space-blind.** One icon per app, no matter how many windows across how many
+  Spaces. Ten project Spaces each with a browser, an IDE, and a terminal collapse into three anonymous icons.
+
 As for the name "Spaceballs", inspiration came about two ways - first the cult classic movie Spaceballs which
 heavily poked fun of the very mainstream Star Wars movies (as I'd love to poke fun of Apple for their modern UX).
 Second, the more one made use of Spaces in their
