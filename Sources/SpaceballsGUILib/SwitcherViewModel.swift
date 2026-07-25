@@ -209,6 +209,13 @@ public final class SwitcherViewModel: ObservableObject {
   /// Used so .spaces/.settings only highlight on the relevant panel.
   @Published public var navigationDisplayUUID: String?
 
+  /// Focused-display state at the last refresh, used to stamp the space MRU
+  /// only on actual transitions. A steady-state refresh must not re-stamp:
+  /// it would demote a space the user explicitly activated but that keyboard
+  /// focus can't follow (an empty space has no window to take key).
+  private var lastFocusedSpaceID: UInt64?
+  private var lastFrontWindowID: Int?
+
   /// Persistent MRU history of space IDs, most recent first.
   /// Updated on each refresh() when the current space changes.
   private var spaceMRUHistory: [UInt64] = []
@@ -266,9 +273,10 @@ public final class SwitcherViewModel: ObservableObject {
     // Uses .optionOnScreenOnly which guarantees front-to-back Z-order, unlike
     // .optionAll which has unspecified ordering. This ensures the actually-focused
     // window appears first even when activated outside Spaceballs (clicking, Cmd+Tab, etc.).
-    if let focusedSpace = focusedCurrentSpace,
-      let frontWindowID = spaceManager.frontmostWindowID(onSpace: focusedSpace)
-    {
+    let frontWindowID = focusedCurrentSpace.flatMap {
+      spaceManager.frontmostWindowID(onSpace: $0)
+    }
+    if let frontWindowID {
       windowMRUHistory.removeAll { $0 == frontWindowID }
       windowMRUHistory.insert(frontWindowID, at: 0)
     }
@@ -282,9 +290,20 @@ public final class SwitcherViewModel: ObservableObject {
     // This preserves ordering across space switches — e.g., switching from
     // Desktop 3 → Desktop 2 gives history [2, 3, ...] so Desktop 3 stays
     // second even though Z-order won't reflect its recency.
+    //
+    // Stamp only on a transition (focused space or frontmost window changed
+    // since the last refresh). A steady-state re-stamp would demote a space
+    // the user explicitly activated via `activateSelected` but that focus
+    // cannot follow — an empty space has no window to take keyboard focus,
+    // so NSScreen.main keeps reporting the old display (issue: empty space
+    // pinned to the bottom of the switcher no matter how often activated).
     if let currentID = focusedCurrentSpace {
-      spaceMRUHistory.removeAll { $0 == currentID }
-      spaceMRUHistory.insert(currentID, at: 0)
+      if currentID != lastFocusedSpaceID || frontWindowID != lastFrontWindowID {
+        spaceMRUHistory.removeAll { $0 == currentID }
+        spaceMRUHistory.insert(currentID, at: 0)
+      }
+      lastFocusedSpaceID = currentID
+      lastFrontWindowID = frontWindowID
     }
 
     // Build the final space order:
@@ -1033,7 +1052,12 @@ public final class SwitcherViewModel: ObservableObject {
         // Activate the first window in this space to trigger space switch
         windowID = firstWindow.id
       } else {
-        // Empty space — switch via Dock accessibility (Mission Control)
+        // Empty space — switch via Dock accessibility (Mission Control).
+        // Stamp the space MRU directly: focus-based inference in refresh()
+        // can't see this switch — an empty space has no window to move
+        // keyboard focus to its display.
+        spaceMRUHistory.removeAll { $0 == spaceID }
+        spaceMRUHistory.insert(spaceID, at: 0)
         let allSpaces = spaceManager.getAllSpaces()
         let displaySpaces = allSpaces.filter { $0.displayUUID == section.displayUUID }
           .filter { $0.type == .desktop }
