@@ -20,6 +20,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var cancellables = Set<AnyCancellable>()
   var windowLayoutStore: WindowLayoutStore!
   private var windowLayoutCoordinator: WindowLayoutCoordinator!
+  private let ejectStore = EjectStore()
+  private let progressOverlay = ProgressOverlay()
+  private let mouseBlocker = MouseInputBlocker()
+  /// One eject/restore MC session at a time; also blocks auto-restore from
+  /// firing mid-eject.
+  private var spaceEvacuationInFlight = false
+  private var pendingRestoreWork: DispatchWorkItem?
   private var permissionsCoordinator: PermissionsCoordinator!
   private var permissionsGrantTimer: Timer?
 
@@ -72,6 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
 
     setupMainMenu()
+
+    assignDefaultSpaceNames()
+    armEjectionRecords()
 
     keyInterceptor = KeyInterceptor()
     keyInterceptor.delegate = self
@@ -129,6 +139,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
       .store(in: &cancellables)
 
+    viewModel.spaceManager.moveTiming = appSettings.moveTiming
+
+    Publishers.CombineLatest3(
+      appSettings.$timingSpaceSwitchSettle,
+      appSettings.$timingDropSettle,
+      appSettings.$timingBetweenDrags
+    )
+    .dropFirst()
+    .sink { [weak self] settle, drop, between in
+      self?.viewModel.spaceManager.moveTiming = SpaceMoveTiming(
+        preSwitchSettle: settle, dropSettle: drop, interDragPause: between)
+    }
+    .store(in: &cancellables)
+
     // Dismiss on click outside any panel
     clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
       [weak self] event in
@@ -168,7 +192,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
         Diagnostics.writeHeader(
           appVersion: self.appVersionString, spaceManager: self.viewModel.spaceManager)
+        self.assignDefaultSpaceNames()
+        self.armEjectionRecords()
       }
+      self.scheduleEjectionRestore()
     }
 
     NSWorkspace.shared.notificationCenter.addObserver(
@@ -434,6 +461,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let cfUUID = CGDisplayCreateUUIDFromDisplayID(screenNumber)?.takeUnretainedValue()
     guard let cfUUID else { return nil }
     return CFUUIDCreateString(nil, cfUUID) as String
+  }
+
+  /// Names each external display's sole unnamed desktop space "Default
+  /// Space" — a pinned anchor space, so any named space on that display can
+  /// always be moved away without first creating a sibling. Idempotent;
+  /// runs at launch and on every display reconfiguration.
+  private func assignDefaultSpaceNames() {
+    DefaultSpaceNamer.assignNames(
+      spaces: viewModel.spaceManager.getAllSpaces(),
+      builtinDisplayUUID: SpaceManager.builtinDisplayUUID(),
+      store: spaceNameStore)
   }
 
   /// The physical layout of the connected displays, in NSScreen (y-up)
@@ -795,6 +833,164 @@ extension AppDelegate: KeyInterceptorDelegate {
 
   func keyInterceptorToggleMoveMode() {
     viewModel.toggleMoveMode()
+  }
+
+  func keyInterceptorRestoreSpaces() {
+    guard !spaceEvacuationInFlight else { return }
+    keyInterceptor.setSuppressConfirm(true)
+    hidePanel()
+    runSpaceRestore(onlyArmed: false, showHUD: true)
+  }
+
+  func keyInterceptorEjectSpaces() {
+    guard !spaceEvacuationInFlight else { return }
+    keyInterceptor.setSuppressConfirm(true)
+    hidePanel()
+
+    spaceEvacuationInFlight = true
+    // Block Cmd+Tab and friends during the Mission Control ballet — a panel
+    // opening mid-drag would fight the synthetic mouse events.
+    keyInterceptor.setRestoring(true)
+
+    // Physical mouse input is consumed for the duration — a stray user move
+    // mid-drag yanks the tile off course. Deadline scales with the workload;
+    // the tap also self-expires (see MouseInputBlocker) and every completion
+    // path below unblocks.
+    let planned = EjectPlanner.plan(
+      spaces: viewModel.spaceManager.getAllSpaces(),
+      targetDisplayUUID: SpaceManager.builtinDisplayUUID() ?? "",
+      names: spaceNameStore.allCustomNames())
+    mouseBlocker.block(for: 20.0 + 6.0 * Double(planned.moves.count))
+    progressOverlay.show(
+      message: "Ejecting Spaces…",
+      subtitle: "Mouse interaction paused while ejecting…")
+
+    DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+      guard let self else { return }
+      let result = Result {
+        try self.viewModel.spaceManager.ejectSpaces(
+          spaceNameStore: self.spaceNameStore, ejectStore: self.ejectStore)
+      }
+      DispatchQueue.main.async {
+        self.spaceEvacuationInFlight = false
+        self.keyInterceptor.setRestoring(false)
+        self.mouseBlocker.unblock()
+        switch result {
+        case .success(let summary):
+          if summary.ejected.isEmpty && summary.failed.isEmpty {
+            self.progressOverlay.update(message: "Nothing to eject")
+          } else {
+            let count = summary.ejected.count
+            var message = "Ejected \(count) Space\(count == 1 ? "" : "s")"
+            if !summary.failed.isEmpty { message += " (\(summary.failed.count) failed)" }
+            self.progressOverlay.update(message: message)
+          }
+        case .failure(let error):
+          self.progressOverlay.update(message: "Eject failed: \(error.localizedDescription)")
+        }
+        // The result screen's whole lifespan is the fade: it appears and
+        // immediately starts fading, gone after 1.5s.
+        self.progressOverlay.dismiss(fadingOver: 1.5)
+      }
+    }
+  }
+
+  /// Arms eject records whose display is currently absent. Auto-restore only
+  /// touches ARMED records — a display must actually go away after the eject
+  /// before its spaces auto-return, so spurious display events (sleep/wake,
+  /// resolution changes) can't undo an eject whose displays never left.
+  /// Runs at launch (records persist across restarts) and on every display
+  /// reconfiguration.
+  private func armEjectionRecords() {
+    let pending = ejectStore.pendingEjections()
+    guard !pending.isEmpty else { return }
+    let connected = Set(viewModel.spaceManager.getAllSpaces().map(\.displayUUID))
+    let absent = pending.filter { !connected.contains($0.value) }.map(\.key)
+    ejectStore.armEjections(spaceUUIDs: absent)
+  }
+
+  /// Debounced auto-restore: display reconfiguration fires several times per
+  /// reconnect and CGS needs a beat to settle, so restoration runs once,
+  /// 2 seconds after the last event — and only for ARMED records whose
+  /// display is actually back.
+  private func scheduleEjectionRestore() {
+    pendingRestoreWork?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.restoreEjectedSpacesIfReady() }
+    pendingRestoreWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+  }
+
+  private func restoreEjectedSpacesIfReady() {
+    guard !spaceEvacuationInFlight else { return }
+    let armed = ejectStore.armedEjections()
+    let pending = ejectStore.pendingEjections().filter { armed.contains($0.key) }
+    guard !pending.isEmpty else { return }
+
+    let plan = RestorePlanner.plan(
+      spaces: viewModel.spaceManager.getAllSpaces(), pending: pending)
+    // Stale/already-home records still need clearing even when nothing
+    // moves, but only a real move warrants the HUD and input blocking.
+    let hasMoves = !plan.moves.isEmpty
+    if !hasMoves && plan.stale.isEmpty && plan.completed.isEmpty { return }
+
+    runSpaceRestore(onlyArmed: true, showHUD: hasMoves)
+  }
+
+  /// Shared restore runner for the auto path (armed records only) and the
+  /// manual Cmd+Shift+E path (everything movable).
+  private func runSpaceRestore(onlyArmed: Bool, showHUD: Bool) {
+    let armed = ejectStore.armedEjections()
+    let hadPending = ejectStore.pendingEjections()
+      .contains { !onlyArmed || armed.contains($0.key) }
+    spaceEvacuationInFlight = true
+    if showHUD {
+      keyInterceptor.setRestoring(true)
+      let plan = RestorePlanner.plan(
+        spaces: viewModel.spaceManager.getAllSpaces(),
+        pending: ejectStore.pendingEjections().filter {
+          !onlyArmed || armed.contains($0.key)
+        })
+      mouseBlocker.block(for: 20.0 + 6.0 * Double(plan.moves.count))
+      progressOverlay.show(
+        message: "Restoring Spaces…",
+        subtitle: "Mouse interaction paused while restoring…")
+    }
+
+    DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+      guard let self else { return }
+      let result = Result {
+        try self.viewModel.spaceManager.restoreEjectedSpaces(
+          ejectStore: self.ejectStore, onlyArmed: onlyArmed)
+      }
+      DispatchQueue.main.async {
+        self.spaceEvacuationInFlight = false
+        self.keyInterceptor.setRestoring(false)
+        self.mouseBlocker.unblock()
+        guard showHUD else { return }
+        switch result {
+        case .success(let summary) where !summary.restored.isEmpty:
+          let count = summary.restored.count
+          var message = "Restored \(count) Space\(count == 1 ? "" : "s")"
+          if !summary.waiting.isEmpty {
+            message += " (\(summary.waiting.count) awaiting a display)"
+          }
+          self.progressOverlay.update(message: message)
+        case .success(let summary) where !summary.waiting.isEmpty:
+          self.progressOverlay.update(
+            message: "\(summary.waiting.count) Space(s) awaiting a disconnected display")
+        case .success:
+          self.progressOverlay.update(
+            message: hadPending
+              ? "Space restore incomplete — will retry on reconnect"
+              : "Nothing to restore")
+        case .failure(let error):
+          self.progressOverlay.update(message: "Restore failed: \(error.localizedDescription)")
+        }
+        // The result screen's whole lifespan is the fade: it appears and
+        // immediately starts fading, gone after 1.5s.
+        self.progressOverlay.dismiss(fadingOver: 1.5)
+      }
+    }
   }
 
   func keyInterceptorToggleSpaceMoveMode() {

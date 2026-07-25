@@ -73,6 +73,10 @@ public class SpaceManager {
   /// Bundle IDs of `.regular` apps the user wants hidden from Spaceballs.
   public var excludedBundleIDs: Set<String> = []
 
+  /// User-tunable pauses for the Mission Control drag flows (space moves,
+  /// eject, restore). See SpaceMoveTiming for the knobs and their defaults.
+  public var moveTiming = SpaceMoveTiming()
+
   public init(dataSource: SystemDataSource = CGSDataSource()) {
     self.dataSource = dataSource
   }
@@ -380,6 +384,20 @@ public class SpaceManager {
   }
 
   /// Returns the display UUID currently containing the mouse cursor.
+  /// The CGS display UUID of the built-in display, or nil when none is
+  /// active (clamshell mode, desktop Macs).
+  public static func builtinDisplayUUID() -> String? {
+    var count: UInt32 = 0
+    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    CGGetActiveDisplayList(16, &ids, &count)
+    for i in 0..<Int(count) where CGDisplayIsBuiltin(ids[i]) != 0 {
+      guard let cfUUID = CGDisplayCreateUUIDFromDisplayID(ids[i])?.takeUnretainedValue()
+      else { continue }
+      return CFUUIDCreateString(nil, cfUUID) as String
+    }
+    return nil
+  }
+
   public static func cursorDisplayUUID() -> String? {
     let location = NSEvent.mouseLocation  // global, bottom-left origin
     guard
@@ -455,6 +473,34 @@ public class SpaceManager {
     }
 
     switchToSpace(spaceIndex: spaceIndex, screenNumber: screenNumber)
+  }
+
+  /// The frontmost enumerated window on a Space, if any — drawn from the
+  /// same filtered window set the switcher panel displays (exclusions and
+  /// helper-window rules applied).
+  public func frontWindow(onSpace spaceID: UInt64) -> WindowInfo? {
+    getAllWindows().first { $0.spaceIDs.contains(spaceID) }
+  }
+
+  /// Activates a Space the way the switcher panel does: by activating a
+  /// window on it when one exists — a plain window activation carries the
+  /// space switch with it, no Mission Control involved — and only falling
+  /// back to the Dock's Mission Control interface for empty Spaces.
+  /// Returns true when the fast windowed path succeeded.
+  @discardableResult
+  public func activateSpace(id spaceID: UInt64) throws -> Bool {
+    if let window = frontWindow(onSpace: spaceID) {
+      do {
+        try activateWindow(id: window.id)
+        return true
+      } catch {
+        Diagnostics.log(
+          "space-switch",
+          "window activation for space \(spaceID) failed (\(error)); using Mission Control")
+      }
+    }
+    try switchToSpace(id: spaceID)
+    return false
   }
 
   // MARK: - High-Level Space Operations
@@ -1553,14 +1599,14 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .leftMouseDown,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      down.post(tap: .cghidEventTap)
+      postTagged(down)
     }
     Thread.sleep(forTimeInterval: 0.05)
     if let up = CGEvent(
       mouseEventSource: nil, mouseType: .leftMouseUp,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      up.post(tap: .cghidEventTap)
+      postTagged(up)
     }
   }
 
@@ -1595,6 +1641,18 @@ public class SpaceManager {
 
   // MARK: - CGEvent Mouse Simulation
 
+  /// Magic value stamped into `eventSourceUserData` on every synthetic mouse
+  /// event Spaceballs posts. Real input devices never set this field, so a
+  /// suppression tap (MouseInputBlocker) can pass Spaceballs's own drags
+  /// through while consuming physical mouse input.
+  public static let syntheticEventTag: Int64 = 0x5BACE
+
+  /// Tags a synthetic mouse event as Spaceballs-generated and posts it.
+  private static func postTagged(_ event: CGEvent) {
+    event.setIntegerValueField(.eventSourceUserData, value: syntheticEventTag)
+    event.post(tap: .cghidEventTap)
+  }
+
   /// Moves the cursor to a point without any button press (e.g. to hover-expand
   /// Mission Control's spaces bar).
   static func postMouseMove(at point: CGPoint) {
@@ -1602,7 +1660,7 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .mouseMoved,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      move.post(tap: .cghidEventTap)
+      postTagged(move)
     }
   }
 
@@ -1615,7 +1673,7 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .leftMouseDown,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      down.post(tap: .cghidEventTap)
+      postTagged(down)
     }
     Thread.sleep(forTimeInterval: 0.1)
   }
@@ -1626,7 +1684,7 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .leftMouseDragged,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      drag.post(tap: .cghidEventTap)
+      postTagged(drag)
     }
   }
 
@@ -1723,7 +1781,7 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .leftMouseUp,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      up.post(tap: .cghidEventTap)
+      postTagged(up)
     }
   }
 
@@ -2154,7 +2212,11 @@ public class SpaceManager {
       Diagnostics.log(
         "move-space-display",
         "pre-switch display \(plan.sourceDisplayUUID) to space \(preSwitch.toSpaceID)")
-      switchToSpace(spaceIndex: preSwitch.spaceIndex, screenNumber: sourceScreen)
+      do {
+        try activateSpace(id: preSwitch.toSpaceID)
+      } catch {
+        Diagnostics.log("move-space-display", "pre-switch activation failed: \(error)")
+      }
       let switched = poll(timeout: 3.0) {
         self.getAllSpaces().first(where: { $0.id == spaceID })?.isCurrent == false
       }
@@ -2181,11 +2243,12 @@ public class SpaceManager {
       self.getAllSpaces().first(where: { $0.id == spaceID })?.displayUUID == targetDisplayUUID
     }
 
-    // Make the moved space the target display's active Space. Best-effort:
+    // Make the moved space the target display's active Space (activating a
+    // window on it when it has one — no Mission Control round). Best-effort:
     // the move itself already succeeded, so a failed switch only logs.
     if verified && activateAfterMove {
       do {
-        try switchToSpace(id: spaceID)
+        try activateSpace(id: spaceID)
       } catch {
         Diagnostics.log("move-space-display", "post-move activation failed: \(error)")
       }
@@ -2196,7 +2259,7 @@ public class SpaceManager {
   }
 
   /// Polls `condition` every `interval` until it holds or `timeout` elapses.
-  private func poll(
+  func poll(
     interval: TimeInterval = 0.15, timeout: TimeInterval, until condition: () -> Bool
   ) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
@@ -2236,13 +2299,39 @@ public class SpaceManager {
     sourceSpaceIndex: Int, sourceScreenNumber: CGDirectDisplayID,
     targetScreenNumber: CGDirectDisplayID, verbose: Bool = false
   ) -> Bool {
+    !moveSpacesInMCBatch(
+      [
+        SpaceTileDrag(
+          sourceSpaceIndex: sourceSpaceIndex,
+          sourceScreenNumber: sourceScreenNumber,
+          targetScreenNumber: targetScreenNumber)
+      ],
+      verbose: verbose
+    ).isEmpty
+  }
+
+  /// Performs several space-tile drags in ONE Mission Control session: open
+  /// once, drag each, dismiss once. Returns the indices into `drags` of the
+  /// drags that completed. Drags sharing a source display must be ordered by
+  /// DESCENDING sourceSpaceIndex — completed removals then never shift the
+  /// tile indices of drags still to run. The drop aims at the target bar's
+  /// frame center, so a target bar gaining tiles never goes stale.
+  /// `resolveSourceIndex` (optional) re-derives a drag's tile index just
+  /// before its grab — completed drops shift the remaining tiles, so a
+  /// fresh read beats the planned index; returning nil skips the drag.
+  public func moveSpacesInMCBatch(
+    _ drags: [SpaceTileDrag], verbose: Bool = false,
+    resolveSourceIndex: ((_ dragIndex: Int) -> Int?)? = nil
+  ) -> [Int] {
+    guard !drags.isEmpty else { return [] }
     guard AXIsProcessTrusted() else {
-      print("moveSpaceInMC: Accessibility not trusted")
-      return false
+      print("moveSpacesInMCBatch: Accessibility not trusted")
+      return []
     }
 
     let semaphore = DispatchSemaphore(value: 0)
-    var success = false
+    var completed: [Int] = []
+    let timing = moveTiming
 
     DispatchQueue.global(qos: .userInteractive).async {
       defer { semaphore.signal() }
@@ -2252,11 +2341,20 @@ public class SpaceManager {
           withBundleIdentifier: "com.apple.dock"
         ).first
       else {
-        print("moveSpaceInMC: Dock not running")
+        print("moveSpacesInMCBatch: Dock not running")
         return
       }
 
       let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+
+      // A lingering Mission Control (pre-switch tile press still closing, a
+      // failed earlier attempt, or user-opened) would turn the awake TOGGLE
+      // into a dismissal — make sure it's fully gone, then open fresh.
+      if Self.axChildWithIdentifier(dockElement, identifier: "mc") != nil {
+        Self.dismissMissionControl()
+        _ = Self.awaitMissionControlDismissed(timeout: 2.0)
+        Thread.sleep(forTimeInterval: 0.5)
+      }
       CoreDockSendNotification("com.apple.expose.awake" as CFString)
 
       let mcGroup: AXUIElement? = {
@@ -2269,7 +2367,7 @@ public class SpaceManager {
       }()
 
       guard let mcGroup else {
-        print("moveSpaceInMC: Mission Control not found")
+        print("moveSpacesInMCBatch: Mission Control not found")
         return
       }
 
@@ -2283,7 +2381,7 @@ public class SpaceManager {
       // other bar to drop onto (single display, mirroring, or "Displays have
       // separate Spaces" disabled).
       guard allDisplays.count >= 2 else {
-        print("moveSpaceInMC: need at least two displays in Mission Control")
+        print("moveSpacesInMCBatch: need at least two displays in Mission Control")
         Self.dismissMissionControlIfPresent(dockElement: dockElement)
         return
       }
@@ -2303,143 +2401,161 @@ public class SpaceManager {
         }
       }
 
-      guard let targetDisplay = displayMatching(targetScreenNumber),
-        let targetBar = spacesBar(of: targetDisplay)
-      else {
-        print("moveSpaceInMC: target display \(targetScreenNumber) not found")
-        Self.dismissMissionControlIfPresent(dockElement: dockElement)
-        return
-      }
-
-      guard let sourceDisplay = displayMatching(sourceScreenNumber),
-        let sourceBar = spacesBar(of: sourceDisplay)
-      else {
-        print("moveSpaceInMC: source display \(sourceScreenNumber) not found")
-        Self.dismissMissionControlIfPresent(dockElement: dockElement)
-        return
-      }
-
-      // Locate the tile by index among the bar's desktop tiles (fullscreen
-      // spaces show app-titled tiles in the same bar and don't count), then
-      // capture its title for the drag re-reads — MC doesn't renumber tiles
-      // mid-drag, so the title is a stable handle while frames shift.
-      func desktopTiles(in bar: AXUIElement) -> [AXUIElement] {
-        Self.axChildren(bar).filter {
-          guard let title = Self.axStringAttribute($0, name: "AXTitle"),
-            title.hasPrefix("Desktop "),
-            Int(title.dropFirst("Desktop ".count)) != nil
-          else { return false }
-          return true
+      for (dragIndex, drag) in drags.enumerated() {
+        guard let sourceDisplay = displayMatching(drag.sourceScreenNumber),
+          let sourceBar = spacesBar(of: sourceDisplay),
+          let targetDisplay = displayMatching(drag.targetScreenNumber),
+          let targetBar = spacesBar(of: targetDisplay)
+        else {
+          print("moveSpacesInMCBatch: displays for drag \(dragIndex) not found")
+          continue
         }
-      }
-
-      let tiles = desktopTiles(in: sourceBar)
-      guard sourceSpaceIndex >= 0 && sourceSpaceIndex < tiles.count,
-        let spaceTileTitle = Self.axStringAttribute(
-          tiles[sourceSpaceIndex], name: "AXTitle")
-      else {
-        print(
-          "moveSpaceInMC: tile index \(sourceSpaceIndex) out of range (have \(tiles.count) desktop tiles)"
-        )
-        Self.dismissMissionControlIfPresent(dockElement: dockElement)
-        return
-      }
-
-      let readTileCenter: () -> CGPoint? = {
-        Self.axChildren(sourceBar).first(where: {
-          Self.axStringAttribute($0, name: "AXTitle") == spaceTileTitle
-        }).flatMap(Self.axCenter)
-      }
-
-      // Hover the source bar so it expands, then wait for the tile's frame to
-      // settle — collapsed-bar frames are stale the moment expansion starts.
-      guard let barCenter = Self.axCenter(sourceBar) else {
-        print("moveSpaceInMC: source bar frame unreadable")
-        Self.dismissMissionControlIfPresent(dockElement: dockElement)
-        return
-      }
-      Self.postMouseMove(at: barCenter)
-      guard
-        let grab = Self.awaitStablePoint(
-          read: readTileCenter, delay: { Thread.sleep(forTimeInterval: 0.04) })
-      else {
-        print("moveSpaceInMC: tile \"\(spaceTileTitle)\" not found in source bar")
-        Self.dismissMissionControlIfPresent(dockElement: dockElement)
-        return
-      }
-
-      if verbose { print("  Tile: \"\(spaceTileTitle)\" at \(grab.point)") }
-
-      // Grab, then pull DOWN out of the bar to detach — small horizontal
-      // motion inside the bar reads as reordering, not removal.
-      Self.postMouseMoveAndGrab(at: grab.point)
-      let nudge = CGPoint(x: grab.point.x, y: grab.point.y + 30)
-      Self.postMouseDragToPoint(from: grab.point, to: nudge, steps: 3)
-
-      // Home toward the CENTER of the destination bar's frame. Tiles are laid
-      // out centered in the bar, so the frame center lands mid-row — a clean
-      // insertion point well inside the bar. Tile coordinates are NOT used for
-      // the aim: collapsed-state tiles can report frames above the bar (seen
-      // on portrait displays), and a stale read overshoots to the display's
-      // top edge where MC refuses the drop. The bar expands as the drag
-      // approaches; re-reads bend the path onto the live frame.
-      let readDropTarget: () -> CGPoint? = {
-        guard let barPos = Self.axPosition(targetBar), let barSize = Self.axSize(targetBar)
-        else { return nil }
-        return CGPoint(x: barPos.x + barSize.width / 2, y: barPos.y + barSize.height / 2)
-      }
-
-      // Cross-display paths span thousands of points on large displays, so
-      // stride much longer than the window-move glide (40) — the tile doesn't
-      // need pixel-accurate tracking mid-flight, and homingDrag lands exactly
-      // on the aim for the final step. The settle + dwell at the bar are
-      // unchanged.
-      let arrival = Self.homingDrag(
-        from: nudge,
-        stepLength: 160,
-        read: readDropTarget,
-        move: { point in
-          Self.postMouseDragEvent(at: point)
-          Thread.sleep(forTimeInterval: 0.008)
+        let sourceIndex: Int? =
+          resolveSourceIndex.map { $0(dragIndex) } ?? drag.sourceSpaceIndex
+        guard let sourceIndex else {
+          if verbose { print("moveSpacesInMCBatch: drag \(dragIndex) skipped") }
+          continue
         }
-      )
-      guard let arrival else {
-        print("moveSpaceInMC: destination bar unreadable during drag")
-        Self.postMouseUp(at: nudge)
-        Self.dismissMissionControlIfPresent(dockElement: dockElement)
-        return
+        if Self.performSpaceTileDrag(
+          sourceBar: sourceBar, targetBar: targetBar,
+          sourceSpaceIndex: sourceIndex, dropSettle: timing.dropSettle,
+          verbose: verbose)
+        {
+          completed.append(dragIndex)
+        }
+        // Short bridge toward the next grab; the grab's own settle handles
+        // the tail of Mission Control's re-layout.
+        Thread.sleep(forTimeInterval: timing.interDragPause)
       }
-
-      if verbose { print("  Drop target at \(arrival)") }
-
-      var dropPoint = arrival
-      if let settled = Self.awaitStablePoint(
-        read: readDropTarget, delay: { Thread.sleep(forTimeInterval: 0.04) }),
-        abs(settled.point.x - dropPoint.x) > 2 || abs(settled.point.y - dropPoint.y) > 2
-      {
-        Self.postMouseDragToPoint(from: dropPoint, to: settled.point, steps: 4)
-        dropPoint = settled.point
-      }
-
-      // Dwell over the destination bar with the button held before releasing.
-      // An immediate drop can snap the tile back to its source display — MC
-      // needs a beat with the tile hovering over the bar to accept the drop.
-      // Stationary drag events (not a bare sleep) keep the drag session alive.
-      for _ in 0..<7 {
-        Self.postMouseDragEvent(at: dropPoint)
-        Thread.sleep(forTimeInterval: 0.05)
-      }
-      Self.postMouseUp(at: dropPoint)
-
-      // Let MC commit the drop, then dismiss WITHOUT pressing any tile —
-      // pressing would switch the destination display's active space.
-      Thread.sleep(forTimeInterval: 0.5)
       Self.dismissMissionControlIfPresent(dockElement: dockElement)
-      success = true
     }
 
     semaphore.wait()
-    return success
+    return completed
+  }
+
+  /// Drags one space tile from `sourceBar` onto `targetBar` within an open
+  /// Mission Control session. Does NOT open or dismiss Mission Control —
+  /// that's the session owner's job.
+  private static func performSpaceTileDrag(
+    sourceBar: AXUIElement, targetBar: AXUIElement,
+    sourceSpaceIndex: Int, dropSettle: TimeInterval, verbose: Bool
+  ) -> Bool {
+    // Locate the tile by index among the bar's desktop tiles (fullscreen
+    // spaces show app-titled tiles in the same bar and don't count), then
+    // capture its title for the drag re-reads — MC doesn't renumber tiles
+    // mid-drag, so the title is a stable handle while frames shift.
+    func desktopTiles(in bar: AXUIElement) -> [AXUIElement] {
+      Self.axChildren(bar).filter {
+        guard let title = Self.axStringAttribute($0, name: "AXTitle"),
+          title.hasPrefix("Desktop "),
+          Int(title.dropFirst("Desktop ".count)) != nil
+        else { return false }
+        return true
+      }
+    }
+
+    let tiles = desktopTiles(in: sourceBar)
+    guard sourceSpaceIndex >= 0 && sourceSpaceIndex < tiles.count,
+      let spaceTileTitle = Self.axStringAttribute(
+        tiles[sourceSpaceIndex], name: "AXTitle")
+    else {
+      print(
+        "moveSpaceInMC: tile index \(sourceSpaceIndex) out of range (have \(tiles.count) desktop tiles)"
+      )
+      return false
+    }
+
+    let readTileCenter: () -> CGPoint? = {
+      Self.axChildren(sourceBar).first(where: {
+        Self.axStringAttribute($0, name: "AXTitle") == spaceTileTitle
+      }).flatMap(Self.axCenter)
+    }
+
+    // Hover the source bar so it expands, then wait for the tile's frame to
+    // settle — collapsed-bar frames are stale the moment expansion starts.
+    guard let barCenter = Self.axCenter(sourceBar) else {
+      print("moveSpaceInMC: source bar frame unreadable")
+      return false
+    }
+    Self.postMouseMove(at: barCenter)
+    guard
+      let grab = Self.awaitStablePoint(
+        read: readTileCenter, delay: { Thread.sleep(forTimeInterval: 0.04) })
+    else {
+      print("moveSpaceInMC: tile \"\(spaceTileTitle)\" not found in source bar")
+      return false
+    }
+
+    if verbose { print("  Tile: \"\(spaceTileTitle)\" at \(grab.point)") }
+
+    // Grab, then pull DOWN out of the bar to detach — small horizontal
+    // motion inside the bar reads as reordering, not removal.
+    Self.postMouseMoveAndGrab(at: grab.point)
+    let nudge = CGPoint(x: grab.point.x, y: grab.point.y + 30)
+    Self.postMouseDragToPoint(from: grab.point, to: nudge, steps: 3)
+
+    // Home toward the CENTER of the destination bar's frame. Tiles are laid
+    // out centered in the bar, so the frame center lands mid-row — a clean
+    // insertion point well inside the bar. Tile coordinates are NOT used for
+    // the aim: collapsed-state tiles can report frames above the bar (seen
+    // on portrait displays), and a stale read overshoots to the display's
+    // top edge where MC refuses the drop. The bar expands as the drag
+    // approaches; re-reads bend the path onto the live frame.
+    let readDropTarget: () -> CGPoint? = {
+      guard let barPos = Self.axPosition(targetBar), let barSize = Self.axSize(targetBar)
+      else { return nil }
+      return CGPoint(x: barPos.x + barSize.width / 2, y: barPos.y + barSize.height / 2)
+    }
+
+    // Cross-display paths span thousands of points on large displays, so
+    // stride much longer than the window-move glide (40) — the tile doesn't
+    // need pixel-accurate tracking mid-flight, and homingDrag lands exactly
+    // on the aim for the final step. The settle + dwell at the bar are
+    // unchanged.
+    let arrival = Self.homingDrag(
+      from: nudge,
+      stepLength: 160,
+      read: readDropTarget,
+      move: { point in
+        Self.postMouseDragEvent(at: point)
+        Thread.sleep(forTimeInterval: 0.008)
+      }
+    )
+    guard let arrival else {
+      print("moveSpaceInMC: destination bar unreadable during drag")
+      Self.postMouseUp(at: nudge)
+      return false
+    }
+
+    if verbose { print("  Drop target at \(arrival)") }
+
+    var dropPoint = arrival
+    if let settled = Self.awaitStablePoint(
+      read: readDropTarget, delay: { Thread.sleep(forTimeInterval: 0.04) }),
+      abs(settled.point.x - dropPoint.x) > 2 || abs(settled.point.y - dropPoint.y) > 2
+    {
+      Self.postMouseDragToPoint(from: dropPoint, to: settled.point, steps: 4)
+      dropPoint = settled.point
+    }
+
+    // Dwell over the destination bar with the button held before releasing.
+    // An immediate drop can snap the tile back to its source display — MC
+    // needs a beat with the tile hovering over the bar to accept the drop.
+    // Stationary drag events (not a bare sleep) keep the drag session alive.
+    for _ in 0..<7 {
+      Self.postMouseDragEvent(at: dropPoint)
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    Self.postMouseUp(at: dropPoint)
+
+    // Brief tail so the drop registers before the caller's next grab or
+    // dismissal — the drop itself commits on mouse-up, and the next grab's
+    // awaitStablePoint adaptively rides out any remaining re-layout. The
+    // session owner dismisses WITHOUT pressing any tile — pressing would
+    // switch the destination display's active space.
+    Thread.sleep(forTimeInterval: dropSettle)
+    return true
   }
 
   /// Dismisses Mission Control only when its AX group is still present. The
@@ -2449,6 +2565,30 @@ public class SpaceManager {
     if axChildWithIdentifier(dockElement, identifier: "mc") != nil {
       dismissMissionControl()
     }
+  }
+
+  /// True when the Dock currently exposes a Mission Control AX group.
+  static func missionControlPresent() -> Bool {
+    guard
+      let dockApp = NSRunningApplication.runningApplications(
+        withBundleIdentifier: "com.apple.dock"
+      ).first
+    else { return false }
+    let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+    return axChildWithIdentifier(dockElement, identifier: "mc") != nil
+  }
+
+  /// Polls until Mission Control's AX group disappears from the Dock.
+  /// Sequencing guard for flows that must not send the awake TOGGLE while a
+  /// previous Mission Control appearance is still closing.
+  @discardableResult
+  static func awaitMissionControlDismissed(timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if !missionControlPresent() { return true }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    return !missionControlPresent()
   }
 
   // MARK: - Mission Control Diagnostics

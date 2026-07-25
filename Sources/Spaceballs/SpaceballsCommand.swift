@@ -6,7 +6,8 @@ struct SpaceballsCommand: ParsableCommand {
     var subcommands: [ParsableCommand.Type] = [
       ListCommand.self, WindowCommand.self, RenameCommand.self, SwitchCommand.self,
       CreateCommand.self, CloseSpaceCommand.self, WorkspaceCommand.self, SettingsCommand.self,
-      MoveCommand.self, MoveSpaceCommand.self, DiagnosticsCommand.self,
+      MoveCommand.self, MoveSpaceCommand.self, EjectCommand.self, RestoreCommand.self,
+      DiagnosticsCommand.self,
     ]
     #if DEBUG
       subcommands += [

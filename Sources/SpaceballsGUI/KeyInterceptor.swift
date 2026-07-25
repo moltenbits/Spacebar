@@ -21,6 +21,8 @@ protocol KeyInterceptorDelegate: AnyObject {
   func keyInterceptorCloseSpace()
   func keyInterceptorToggleMoveMode()
   func keyInterceptorToggleSpaceMoveMode()
+  func keyInterceptorEjectSpaces()
+  func keyInterceptorRestoreSpaces()
   func keyInterceptorToggleCreateMenu()
   func keyInterceptorShowResize()
   func keyInterceptorResizeCommit()
@@ -33,10 +35,18 @@ protocol KeyInterceptorDelegate: AnyObject {
 /// the dead tap, freezing keyboard/mouse input system-wide.
 private var activeEventTap: CFMachPort?
 
+/// MouseInputBlocker's tap, registered here so the signal handler also
+/// releases a mouse block on SIGTERM/SIGINT/SIGHUP.
+var activeMouseBlockerTap: CFMachPort?
+
 private func signalHandler(_ signal: Int32) {
   if let tap = activeEventTap {
     CGEvent.tapEnable(tap: tap, enable: false)
     activeEventTap = nil
+  }
+  if let tap = activeMouseBlockerTap {
+    CGEvent.tapEnable(tap: tap, enable: false)
+    activeMouseBlockerTap = nil
   }
   // Re-raise with default handler so the process actually terminates
   Darwin.signal(signal, SIG_DFL)
@@ -403,6 +413,20 @@ private func keyInterceptorCallback(
       }
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorToggleMoveMode()
+      }
+      return nil  // consume
+    }
+
+    // Eject Spaces to the built-in display (Shift restores them)
+    if cmdHeld && keyCode == Int64(bindings.ejectSpaces) && interceptor.panelVisible {
+      if flags.contains(.maskShift) {
+        DispatchQueue.main.async {
+          interceptor.delegate?.keyInterceptorRestoreSpaces()
+        }
+        return nil  // consume
+      }
+      DispatchQueue.main.async {
+        interceptor.delegate?.keyInterceptorEjectSpaces()
       }
       return nil  // consume
     }

@@ -1144,20 +1144,18 @@ public final class SwitcherViewModel: ObservableObject {
         // Activate the first window in this space to trigger space switch
         windowID = firstWindow.id
       } else {
-        // Empty space — switch via Dock accessibility (Mission Control).
+        // Empty space — activateSpace falls back to the Dock's Mission
+        // Control interface (the shared path eject/restore use too).
         // Stamp the space MRU directly: focus-based inference in refresh()
         // can't see this switch — an empty space has no window to move
         // keyboard focus to its display.
         spaceMRUHistory.removeAll { $0 == spaceID }
         spaceMRUHistory.insert(spaceID, at: 0)
-        let allSpaces = spaceManager.getAllSpaces()
-        let displaySpaces = allSpaces.filter { $0.displayUUID == section.displayUUID }
-          .filter { $0.type == .desktop }
-        guard let spaceIndex = displaySpaces.firstIndex(where: { $0.id == spaceID }) else {
-          return
+        do {
+          try spaceManager.activateSpace(id: spaceID)
+        } catch {
+          Diagnostics.log("activate", "space \(spaceID) failed: \(error)")
         }
-        guard let screenNumber = SpaceManager.displayIDForUUID(section.displayUUID) else { return }
-        spaceManager.switchToSpace(spaceIndex: spaceIndex, screenNumber: screenNumber)
         return
       }
     case .spaces, .settings, nil:
@@ -1169,7 +1167,7 @@ public final class SwitcherViewModel: ObservableObject {
     do {
       try spaceManager.activateWindow(id: windowID)
     } catch {
-      print("Failed to activate window \(windowID): \(error)")
+      Diagnostics.log("activate", "window \(windowID) failed: \(error)")
     }
   }
 
@@ -1383,7 +1381,8 @@ public final class SwitcherViewModel: ObservableObject {
           windowID: moveWindowID, targetSpaceID: moveTargetSpaceID,
           activateAfterMove: activateAfterMove)
       } catch {
-        print("Failed to move window \(moveWindowID) to space \(moveTargetSpaceID): \(error)")
+        Diagnostics.log(
+          "move-window", "window \(moveWindowID) to space \(moveTargetSpaceID) failed: \(error)")
       }
     }
 
@@ -1424,6 +1423,17 @@ public final class SwitcherViewModel: ObservableObject {
     guard let spaceID,
       let section = sections.first(where: { $0.id == spaceID })
     else { return }
+
+    // A display's Default Space is pinned: it exists so the display always
+    // keeps an anchor space, so moving it away would defeat its purpose.
+    // Renaming it is the deliberate way to unpin it.
+    if spaceNameStore.customName(forSpaceUUID: section.spaceUUID)
+      == SpaceNameStore.defaultSpaceName
+    {
+      sortOverlayText = "\(SpaceNameStore.defaultSpaceName) is pinned to its display"
+      sortOverlayGeneration += 1
+      return
+    }
 
     // Only desktop spaces can be moved; the display cycle needs somewhere to go.
     let allSpaces = spaceManager.getAllSpaces()
@@ -1553,7 +1563,8 @@ public final class SwitcherViewModel: ObservableObject {
           }
         }
       } catch {
-        print("Failed to move space \(spaceID) to display \(targetDisplayUUID): \(error)")
+        Diagnostics.log(
+          "move-space-display", "space \(spaceID) to \(targetDisplayUUID) failed: \(error)")
       }
     }
 
@@ -1596,7 +1607,7 @@ public final class SwitcherViewModel: ObservableObject {
     do {
       try spaceManager.closeWindow(id: windowID)
     } catch {
-      print("Failed to close window \(windowID): \(error)")
+      Diagnostics.log("window", "close \(windowID) failed: \(error)")
       return
     }
     windowMRUHistory.removeAll { $0 == windowID }
@@ -1625,7 +1636,7 @@ public final class SwitcherViewModel: ObservableObject {
     do {
       try spaceManager.quitApp(owningWindowID: windowID)
     } catch {
-      print("Failed to quit app for window \(windowID): \(error)")
+      Diagnostics.log("window", "quit app for window \(windowID) failed: \(error)")
       return
     }
     // Remove all MRU entries and rows for the quitting app immediately

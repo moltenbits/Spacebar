@@ -83,7 +83,7 @@ public final class ResizeViewModel: ObservableObject {
       try WindowResizer.resize(
         element, to: region, on: screen, margins: margins, pid: focusedWindowPID)
     } catch {
-      print("Resize failed: \(error.localizedDescription)")
+      Diagnostics.log("resize", "resize failed: \(error.localizedDescription)")
     }
     lastPresetKeyCode = nil
     onResizeComplete?()
@@ -137,7 +137,7 @@ public final class ResizeViewModel: ObservableObject {
         element, to: region, on: screen, margins: margins, pid: focusedWindowPID,
         completion: completion)
     } catch {
-      print("Resize failed: \(error.localizedDescription)")
+      Diagnostics.log("resize", "resize failed: \(error.localizedDescription)")
       completion?()
     }
   }

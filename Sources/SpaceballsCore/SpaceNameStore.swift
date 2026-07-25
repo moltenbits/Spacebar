@@ -13,6 +13,11 @@ public protocol SpaceNameStoring {
 // MARK: - UserDefaults Implementation
 
 public final class SpaceNameStore: SpaceNameStoring {
+  /// The auto-assigned name marking a display's pinned anchor space (see
+  /// DefaultSpaceNamer). A space carrying exactly this name cannot be moved
+  /// to another display; renaming it unpins it.
+  public static let defaultSpaceName = "Default Space"
+
   private static let key = "customSpaceNames"
   private let defaults: UserDefaults
 

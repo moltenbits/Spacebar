@@ -40,6 +40,14 @@ struct MoveSpaceCommand: ParsableCommand {
       spaceID = resolved
     }
 
+    // A display's Default Space is pinned to its display (rename it to unpin).
+    if let pinned = allSpaces.first(where: { $0.id == spaceID }),
+      spaceNameStore.customName(forSpaceUUID: pinned.uuid) == SpaceNameStore.defaultSpaceName
+    {
+      print("\"\(SpaceNameStore.defaultSpaceName)\" is pinned to its display and cannot be moved.")
+      throw ExitCode.failure
+    }
+
     // Resolve display against the unique display UUIDs in CGS order, so
     // ordinals match the display grouping in 'spaceballs list'.
     let candidates = Self.displayCandidates(from: allSpaces)

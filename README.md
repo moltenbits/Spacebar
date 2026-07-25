@@ -87,6 +87,8 @@ way while building Spaceballs:
 - **Cross-space activation** — switches to any window on any Space with native animation
 - **Move windows between Spaces** — Cmd+M to mark a window, navigate to the target space, release to move (no SIP required)
 - **Move Spaces between displays** — Cmd+Shift+M to mark a Space, arrow to the target display, release to move
+- **Stable Default Spaces** — each external display's fresh space is auto-named "Default Space" and pinned to its display, so a display always keeps an anchor space and any named Space can be moved off it without first creating a sibling (rename a Default Space to unpin it; the built-in display is exempt)
+- **Eject before disconnect** — press Cmd+E (or run `spaceballs eject`) *before* unplugging external displays to sweep their Spaces onto the built-in display, so disconnecting doesn't scatter windows into random Spaces; on reconnect, ejected Spaces are automatically restored to the displays they came from. Ejecting must be triggered manually — once a display is unplugged, it's too late
 - **Window resizing** — Cmd+Shift+D opens a grid overlay for the focused window: drag cells to resize, or apply
   configurable presets (pressing a preset again cycles it across screens)
 - **Keyboard-driven** — Cmd+Tab to cycle, Cmd+\` to go back; all shortcuts customizable in Settings
@@ -142,6 +144,8 @@ Once running, the app lives in the background (no Dock icon). Keyboard shortcuts
 | Cmd+R | Rename selected space (Enter to save, Escape to cancel) |
 | Cmd+N | Create a new space |
 | Cmd+S | Cycle sort order (MRU / Ordinal / Name) |
+| Cmd+E | Eject: move all external displays' non-default Spaces to the built-in display |
+| Cmd+Shift+E | Restore ejected Spaces to their original displays |
 | Cmd+Shift+D | Toggle the window resize grid (works globally, no panel needed) |
 | Cmd+, | Open Settings |
 | Type | Filter windows by app name or title |
@@ -175,7 +179,8 @@ spaceballs move 12345 67890             # Move by window ID and space ID
 
 An entire Space — with all its windows — can be relocated to another display, again via simulated Mission Control
 drag (no SIP required). If the Space is the display's only desktop or is currently active, Spaceballs handles the
-prerequisites automatically (creates a sibling Space / switches away first).
+prerequisites automatically (creates a sibling Space / switches away first). Spaces named "Default Space" are
+pinned to their display and refuse to move, in both the GUI and the CLI — rename one to unpin it.
 
 **How to use:**
 
@@ -194,6 +199,25 @@ From the CLI:
 spaceballs move-space "Work" 2          # Space name → 2nd display
 spaceballs move-space "Desktop 3" DELL  # "Desktop N" → display name substring
 ```
+
+**Ejecting before disconnect:** macOS scatters a disconnected display's windows into arbitrary Spaces the
+moment the display goes away — and once it's unplugged, it's too late to fix. **Ejecting is a deliberate,
+manual step: press Cmd+E (or run `spaceballs eject`) *before* you disconnect.** Spaceballs has no way to do
+this for you automatically; unplug without ejecting and the usual scrambling happens.
+
+An eject moves every non-default Space from every external display onto the built-in display, keeping each
+Space — and the apps in it — intact (each display keeps its Default Space, and the Space you're working on
+stays put). When the displays come back, the ejected Spaces are automatically restored to the displays they
+came from, and each display returns to the Space that was active when you ejected. Restore can also be
+triggered by hand at any time with **Cmd+Shift+E** or `spaceballs restore`.
+
+Auto-restore only fires for displays that actually went away and came back — ejecting and then continuing to
+work with everything still plugged in won't be undone by a display going to sleep.
+
+While an eject or restore runs, a full-screen overlay appears and physical mouse input is paused (Spaceballs
+is driving the cursor); input returns as soon as the completion message appears, and the pause times out on
+its own if anything goes wrong. Pacing is adjustable in **Settings → Timing** — if a Space snaps back to its
+display instead of moving on your hardware, nudge the pauses up.
 
 ### Resizing Windows
 
