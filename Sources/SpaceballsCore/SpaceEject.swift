@@ -150,7 +150,7 @@ extension SpaceManager {
     for preSwitch in preSwitches {
       guard let screen = Self.displayIDForUUID(preSwitch.displayUUID) else { continue }
       switchToSpace(spaceIndex: preSwitch.toSpaceIndex, screenNumber: screen)
-      let switched = poll(timeout: 3.0) {
+      let switched = poll(interval: 0.05, timeout: 3.0) {
         self.getAllSpaces().first(where: {
           $0.displayUUID == preSwitch.displayUUID && $0.isCurrent
         })?.id == preSwitch.toSpaceID
@@ -159,9 +159,11 @@ extension SpaceManager {
         Diagnostics.log(
           "eject", "pre-switch of \(preSwitch.displayUUID) not confirmed — continuing")
       }
+      // The dismissal wait is the hard signal that the next awake will OPEN
+      // rather than toggle-close; the short tail only bridges any lag
+      // between the AX group vanishing and the Dock's internal state flip.
       Self.awaitMissionControlDismissed(timeout: 2.0)
-      // Let the space-switch animation finish before the next MC round.
-      Thread.sleep(forTimeInterval: 0.8)
+      Thread.sleep(forTimeInterval: 0.25)
     }
 
     var drags: [SpaceTileDrag] = []
@@ -240,7 +242,7 @@ extension SpaceManager {
           Diagnostics.log("eject", "reactivating \(spaceUUID) on \(displayUUID) failed: \(error)")
         }
         Self.awaitMissionControlDismissed(timeout: 2.0)
-        Thread.sleep(forTimeInterval: 0.8)
+        Thread.sleep(forTimeInterval: 0.25)
       }
       ejectStore.clearActiveSpace(displayUUID: displayUUID)
     }
