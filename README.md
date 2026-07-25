@@ -88,7 +88,7 @@ way while building Spaceballs:
 - **Move windows between Spaces** — Cmd+M to mark a window, navigate to the target space, release to move (no SIP required)
 - **Move Spaces between displays** — Cmd+Shift+M to mark a Space, arrow to the target display, release to move
 - **Stable Default Spaces** — each external display's fresh space is auto-named "Default Space" and pinned to its display, so a display always keeps an anchor space and any named Space can be moved off it without first creating a sibling (rename a Default Space to unpin it; the built-in display is exempt)
-- **Eject before disconnect** — Cmd+E (or `spaceballs eject`) sweeps every non-default Space from all external displays onto the built-in display in a single Mission Control pass, so disconnecting doesn't scatter windows into random Spaces; on reconnect, ejected Spaces are automatically restored to the displays they came from (`spaceballs restore` does it manually)
+- **Eject before disconnect** — press Cmd+E (or run `spaceballs eject`) *before* unplugging external displays to sweep their Spaces onto the built-in display, so disconnecting doesn't scatter windows into random Spaces; on reconnect, ejected Spaces are automatically restored to the displays they came from. Ejecting must be triggered manually — once a display is unplugged, it's too late
 - **Window resizing** — Cmd+Shift+D opens a grid overlay for the focused window: drag cells to resize, or apply
   configurable presets (pressing a preset again cycles it across screens)
 - **Keyboard-driven** — Cmd+Tab to cycle, Cmd+\` to go back; all shortcuts customizable in Settings
@@ -200,18 +200,24 @@ spaceballs move-space "Work" 2          # Space name → 2nd display
 spaceballs move-space "Desktop 3" DELL  # "Desktop N" → display name substring
 ```
 
-**Ejecting before disconnect:** macOS dumps a disconnected display's windows into arbitrary Spaces. **Cmd+E**
-(or `spaceballs eject`) prepares for a safe disconnect: every non-default Space on every external display is
-moved onto the built-in display in one Mission Control session (Default Spaces stay behind as each display's
-anchor; a display that would be left empty gets one created first). Nothing is activated — the built-in
-display's current Space stays put. Each ejected Space's origin is recorded, and when the displays reconnect,
-Spaceballs automatically moves the ejected Spaces back where they came from. Auto-restore is **armed per
-record**: it only fires for Spaces whose display was actually observed absent after the eject, so ejecting
-and continuing to work with the displays attached can't be undone by a stray display event (sleep/wake,
-resolution changes). **Cmd+Shift+E** (or `spaceballs restore`) restores everything movable on demand,
-armed or not. Each display's active Space at eject time is also captured, and once its Space is back home a
-restore reactivates it — the Space you were standing on before the eject is the one you're standing on after
-the restore.
+**Ejecting before disconnect:** macOS scatters a disconnected display's windows into arbitrary Spaces the
+moment the display goes away — and once it's unplugged, it's too late to fix. **Ejecting is a deliberate,
+manual step: press Cmd+E (or run `spaceballs eject`) *before* you disconnect.** Spaceballs has no way to do
+this for you automatically; unplug without ejecting and the usual scrambling happens.
+
+An eject moves every non-default Space from every external display onto the built-in display, keeping each
+Space — and the apps in it — intact (each display keeps its Default Space, and the Space you're working on
+stays put). When the displays come back, the ejected Spaces are automatically restored to the displays they
+came from, and each display returns to the Space that was active when you ejected. Restore can also be
+triggered by hand at any time with **Cmd+Shift+E** or `spaceballs restore`.
+
+Auto-restore only fires for displays that actually went away and came back — ejecting and then continuing to
+work with everything still plugged in won't be undone by a display going to sleep.
+
+While an eject or restore runs, a full-screen overlay appears and physical mouse input is paused (Spaceballs
+is driving the cursor); input returns as soon as the completion message appears, and the pause times out on
+its own if anything goes wrong. Pacing is adjustable in **Settings → Timing** — if a Space snaps back to its
+display instead of moving on your hardware, nudge the pauses up.
 
 ### Resizing Windows
 
