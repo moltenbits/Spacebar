@@ -414,32 +414,48 @@ struct SwitcherView: View {
           viewModel.activateSelected()
         }
     } else {
-      // Non-empty space — first row gets the space label
-      ForEach(Array(section.windows.enumerated()), id: \.element.id) { index, row in
-        let isFirstRow = index == 0
-        SwitcherRowView(
-          row: row,
-          isSelected: viewModel.selectedItem == .windowRow(row.id),
-          isMoveMode: viewModel.moveMode,
-          isMarkedForSpaceMove: viewModel.spaceMoveMode && viewModel.markedSpaceID == section.id,
-          showAppIcon: appSettings.showAppIcons,
-          textSize: CGFloat(appSettings.textSize),
-          iconSize: appSettings.iconSize,
-          spaceLabel: isFirstRow ? buildSpaceLabel(section) : nil,
-          spaceBadge: isFirstRow ? buildSpaceBadge(section) : nil,
-          spaceLabelWidth: spaceLabelWidth,
-          isRenaming: isFirstRow && isRenamingThisSection,
-          renameText: (isFirstRow && isRenamingThisSection)
-            ? $viewModel.renameText : .constant("")
-        )
-        .id(row.id)
-        .padding(.top, isFirstRow ? 4 : 0)
-        .onTapGesture {
-          guard !viewModel.isRenaming else { return }
-          viewModel.selectedItem = .windowRow(row.id)
-          viewModel.activateSelected()
+      // Non-empty space — first row gets the space label. The rows are
+      // wrapped in a single container so space-move mode can mark the whole
+      // space with one border instead of tinting every row.
+      let isMarkedForSpaceMove =
+        viewModel.spaceMoveMode && viewModel.markedSpaceID == section.id
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(Array(section.windows.enumerated()), id: \.element.id) { index, row in
+          let isFirstRow = index == 0
+          SwitcherRowView(
+            row: row,
+            isSelected: viewModel.selectedItem == .windowRow(row.id),
+            isMoveMode: viewModel.moveMode,
+            showAppIcon: appSettings.showAppIcons,
+            textSize: CGFloat(appSettings.textSize),
+            iconSize: appSettings.iconSize,
+            spaceLabel: isFirstRow ? buildSpaceLabel(section) : nil,
+            spaceBadge: isFirstRow ? buildSpaceBadge(section) : nil,
+            spaceLabelWidth: spaceLabelWidth,
+            isRenaming: isFirstRow && isRenamingThisSection,
+            renameText: (isFirstRow && isRenamingThisSection)
+              ? $viewModel.renameText : .constant("")
+          )
+          .id(row.id)
+          .onTapGesture {
+            guard !viewModel.isRenaming else { return }
+            viewModel.selectedItem = .windowRow(row.id)
+            viewModel.activateSelected()
+          }
         }
       }
+      .background(
+        isMarkedForSpaceMove
+          ? RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.15))
+          : nil
+      )
+      .overlay(
+        isMarkedForSpaceMove
+          ? RoundedRectangle(cornerRadius: 8).stroke(
+            Color.accentColor.opacity(0.9), lineWidth: 2)
+          : nil
+      )
+      .padding(.top, 4)
     }
   }
   // MARK: - Empty Space Row
@@ -487,10 +503,16 @@ struct SwitcherView: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(
       isMarkedForSpaceMove
-        ? RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.35))
+        ? RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.15))
         : isSelected
           ? RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.8))
           : nil
+    )
+    .overlay(
+      isMarkedForSpaceMove
+        ? RoundedRectangle(cornerRadius: 8).stroke(
+          Color.accentColor.opacity(0.9), lineWidth: 2)
+        : nil
     )
     .contentShape(Rectangle())
   }

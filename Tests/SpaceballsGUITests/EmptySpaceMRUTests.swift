@@ -201,7 +201,8 @@ struct SpaceMoveMRUTests {
     #expect(vm.mruTopDisplayUUID == "display-2")
   }
 
-  @Test("Moving the focused display's current space keeps it above the replacement's inferred stamp")
+  @Test(
+    "Moving the focused display's current space keeps it above the replacement's inferred stamp")
   func movedCurrentSpaceOutranksReplacementStamp() {
     let ds = makeEmptySpaceScenario()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
