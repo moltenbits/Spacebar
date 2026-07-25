@@ -184,6 +184,11 @@ public final class SwitcherViewModel: ObservableObject {
   /// Non-empty signals mode 3 (multi-panel per-display).
   public var displayOrder: [String] = []
 
+  /// Physical display layout used for directional (Shift+arrow) display
+  /// targeting. Set by the app when the panel opens; when nil (tests, no
+  /// AppKit context) directional moves fall back to cycling in CGS order.
+  public var displayArrangement: DisplayArrangement?
+
   /// When true, spaces with no windows are included in the switcher.
   public var showEmptySpaces: Bool = true
 
@@ -1177,6 +1182,31 @@ public final class SwitcherViewModel: ObservableObject {
     moveMarkedWindowToAdjacentDisplay(forward: false)
   }
 
+  /// Moves the marked window row toward the display in `direction` on the
+  /// physical arrangement. No-op when the arrangement has no display there
+  /// (or it has no visible section to receive the row); falls back to
+  /// cycling when no arrangement is available.
+  public func moveMarkedWindow(inDirection direction: ArrangementDirection) {
+    guard moveMode, let windowID = markedWindowID,
+      let sourceIdx = sections.firstIndex(where: {
+        $0.windows.contains(where: { $0.id == windowID })
+      })
+    else { return }
+
+    guard let arrangement = displayArrangement else {
+      moveMarkedWindowToAdjacentDisplay(
+        forward: direction == .right || direction == .down)
+      return
+    }
+
+    guard
+      let targetUUID = arrangement.neighborUUID(
+        of: sections[sourceIdx].displayUUID, direction: direction),
+      let targetIdx = sections.firstIndex(where: { $0.displayUUID == targetUUID })
+    else { return }
+    moveMarkedWindowRow(windowID: windowID, from: sourceIdx, to: targetIdx)
+  }
+
   private func moveMarkedWindowToAdjacentDisplay(forward: Bool) {
     guard moveMode, let windowID = markedWindowID,
       let sourceIdx = sections.firstIndex(where: {
@@ -1205,8 +1235,12 @@ public final class SwitcherViewModel: ObservableObject {
         break
       }
     }
-    guard let targetIdx,
-      let rowIdx = sections[sourceIdx].windows.firstIndex(where: { $0.id == windowID })
+    guard let targetIdx else { return }
+    moveMarkedWindowRow(windowID: windowID, from: sourceIdx, to: targetIdx)
+  }
+
+  private func moveMarkedWindowRow(windowID: Int, from sourceIdx: Int, to targetIdx: Int) {
+    guard let rowIdx = sections[sourceIdx].windows.firstIndex(where: { $0.id == windowID })
     else { return }
 
     var updated = sections
@@ -1365,6 +1399,27 @@ public final class SwitcherViewModel: ObservableObject {
     retargetMarkedSpace(offset: -1)
   }
 
+  /// Retargets the marked space toward the display in `direction` on the
+  /// physical arrangement. No-op when the arrangement has no display there;
+  /// falls back to cycling when no arrangement is available.
+  public func moveMarkedSpace(inDirection direction: ArrangementDirection) {
+    guard spaceMoveMode, let spaceID = markedSpaceID,
+      let sectionIndex = sections.firstIndex(where: { $0.id == spaceID })
+    else { return }
+
+    guard let arrangement = displayArrangement else {
+      retargetMarkedSpace(offset: direction == .right || direction == .down ? 1 : -1)
+      return
+    }
+
+    guard
+      let targetUUID = arrangement.neighborUUID(
+        of: sections[sectionIndex].displayUUID, direction: direction),
+      let target = spaceMoveDisplays.first(where: { $0.uuid == targetUUID })
+    else { return }
+    retargetMarkedSpace(to: target, sectionIndex: sectionIndex)
+  }
+
   /// Retags the marked section with the adjacent display in the cycle. The
   /// per-display panels filter sections by `displayUUID`, so retagging is what
   /// visually moves the section between displays.
@@ -1378,8 +1433,14 @@ public final class SwitcherViewModel: ObservableObject {
     else { return }
 
     let count = spaceMoveDisplays.count
-    let next = spaceMoveDisplays[(position + offset + count) % count]
+    retargetMarkedSpace(
+      to: spaceMoveDisplays[(position + offset + count) % count],
+      sectionIndex: sectionIndex)
+  }
 
+  private func retargetMarkedSpace(
+    to next: (uuid: String, name: String), sectionIndex: Int
+  ) {
     let old = sections[sectionIndex]
     sections[sectionIndex] = SwitcherSection(
       id: old.id,
@@ -1390,7 +1451,7 @@ public final class SwitcherViewModel: ObservableObject {
       isCurrent: old.isCurrent,
       ordinalLabel: old.ordinalLabel,
       windows: old.windows)
-    selectedItem = .spaceHeader(spaceID)
+    selectedItem = .spaceHeader(old.id)
   }
 
   /// Executes the move: relocates the marked space to whatever display its

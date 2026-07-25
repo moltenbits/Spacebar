@@ -172,7 +172,7 @@ Native CGS/SkyLight move APIs (`SLSMoveWindowsToManagedSpace`, `CGSAddWindowsToS
 - Requires ≥2 `mc.display` elements (fails early under mirroring / "Displays have separate Spaces" off)
 - MC dismissal is guarded: `com.apple.expose.awake` TOGGLES Mission Control, so it is only re-sent when the `mc` AX group is still present
 - The `move-space <space> <display>` CLI subcommand accepts space IDs/names/"Desktop N" and display name substrings/UUIDs/1-based ordinals (`DisplayArgumentResolver`); DEBUG builds add `mc-move-space-test <sourceDisplay> <index> <targetDisplay>` for raw drag tuning
-- GUI: **Cmd+Shift+M** enters space-move mode (Cmd+M remains window-move); arrows cycle the marked space between displays, Enter executes, Esc cancels
+- GUI: **Cmd+Shift+M** enters space-move mode (Cmd+M remains window-move); plain arrows cycle the marked space between displays, Shift+arrows target the display in that physical direction (`DisplayArrangement` nearest-neighbor scoring over `NSScreen.frame`, falling back to cycling when no arrangement is set), Enter executes, Esc cancels
 - Verified live on a 4-display setup in all directions: external → built-in, built-in → external, external → external, including pre-switch off an active Space
 
 ### Cross-Space Window Activation Requires .app Bundle

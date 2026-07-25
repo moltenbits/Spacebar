@@ -11,8 +11,7 @@ protocol KeyInterceptorDelegate: AnyObject {
   func keyInterceptorOpenSettings()
   func keyInterceptorCloseWindow()
   func keyInterceptorQuitApp()
-  func keyInterceptorCycleDisplayLeft()
-  func keyInterceptorCycleDisplayRight()
+  func keyInterceptorMoveDisplay(_ direction: ArrangementDirection)
   func keyInterceptorJumpToNextSpace()
   func keyInterceptorJumpToPreviousSpace()
   func keyInterceptorStartRename()
@@ -184,8 +183,7 @@ private func dispatchNavigation(_ command: NavigationCommand, to delegate: KeyIn
   switch command {
   case .nextSpace: delegate?.keyInterceptorJumpToNextSpace()
   case .previousSpace: delegate?.keyInterceptorJumpToPreviousSpace()
-  case .nextDisplay: delegate?.keyInterceptorCycleDisplayRight()
-  case .previousDisplay: delegate?.keyInterceptorCycleDisplayLeft()
+  case .display(let direction): delegate?.keyInterceptorMoveDisplay(direction)
   }
 }
 

@@ -17,12 +17,12 @@ struct NavigationKeyTests {
     #expect(bindings.navigationCommand(keyCode: 123, shiftHeld: false) == .previousSpace)
   }
 
-  @Test("Shifted arrows all navigate by display")
+  @Test("Shifted arrows navigate by display in the arrow's direction")
   func shiftedArrowsNavigateByDisplay() {
-    #expect(bindings.navigationCommand(keyCode: 125, shiftHeld: true) == .nextDisplay)
-    #expect(bindings.navigationCommand(keyCode: 124, shiftHeld: true) == .nextDisplay)
-    #expect(bindings.navigationCommand(keyCode: 126, shiftHeld: true) == .previousDisplay)
-    #expect(bindings.navigationCommand(keyCode: 123, shiftHeld: true) == .previousDisplay)
+    #expect(bindings.navigationCommand(keyCode: 125, shiftHeld: true) == .display(.down))
+    #expect(bindings.navigationCommand(keyCode: 124, shiftHeld: true) == .display(.right))
+    #expect(bindings.navigationCommand(keyCode: 126, shiftHeld: true) == .display(.up))
+    #expect(bindings.navigationCommand(keyCode: 123, shiftHeld: true) == .display(.left))
   }
 
   @Test("Non-navigation keys resolve to nothing")
@@ -38,7 +38,8 @@ struct NavigationKeyTests {
     var custom = KeyBindings()
     custom.nextSpace = 38  // J
     #expect(custom.navigationCommand(keyCode: 38, shiftHeld: false) == .nextSpace)
-    #expect(custom.navigationCommand(keyCode: 38, shiftHeld: true) == .nextDisplay)
+    // The binding slot carries the direction: nextSpace is the "down" slot.
+    #expect(custom.navigationCommand(keyCode: 38, shiftHeld: true) == .display(.down))
     // 125 is no longer bound to any navigation action.
     #expect(custom.navigationCommand(keyCode: 125, shiftHeld: false) == nil)
   }
