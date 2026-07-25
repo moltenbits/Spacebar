@@ -129,8 +129,8 @@ Once running, the app lives in the background (no Dock icon). Keyboard shortcuts
 |---|---|
 | Cmd+Tab | Show panel / move selection down |
 | Cmd+\` | Move selection up |
-| Cmd+↓ / Cmd+↑ (or bare ↓ / ↑) | Jump to next / previous space |
-| Cmd+← / Cmd+→ | Cycle between displays (move-mode-aware) |
+| Cmd+↓/↑/→/← (or bare arrows) | Jump to next / previous space (move-mode-aware) |
+| Cmd+Shift+↓/↑/→/← | Move to next / previous display (move-mode-aware) |
 | Release Cmd (or Cmd+Enter) | Activate selected window or space |
 | Escape | Dismiss panel / cancel current mode |
 | Cmd+M | Enter move mode (mark selected window for moving between Spaces) |
@@ -155,7 +155,7 @@ Spaceballs can move windows between Spaces — something macOS does not expose v
 
 1. **Cmd+Tab** to open Spaceballs and select the window you want to move
 2. **Cmd+M** to enter move mode — the selection highlight turns to a lighter blue
-3. **Cmd+Tab** or **Cmd+Arrow** to visually move the window row to the target space — it will appear as the first item in each space as you navigate
+3. **Cmd+Tab** or **Cmd+Arrow** to visually move the window row space-by-space (**Cmd+Shift+Arrow** jumps display-by-display) — it will appear as the first item in each space as you navigate
 4. **Release Cmd** to execute the move — Spaceballs activates the window, opens Mission Control, drags the window to the target space, switches to that space, and brings the window to front
 5. **Escape** to cancel move mode at any time
 
@@ -180,7 +180,7 @@ prerequisites automatically (creates a sibling Space / switches away first).
 
 1. **Cmd+Tab** to open Spaceballs and select the Space (or any window in it)
 2. **Cmd+Shift+M** to enter space-move mode
-3. **Cmd+← / Cmd+→** to cycle the marked Space between displays
+3. **Arrow keys** (Shift optional — a Space always moves display-to-display) to cycle the marked Space between displays
 4. **Release Cmd** to execute the move, or **Escape** to cancel
 
 By default the moved Space becomes the active Space on its destination display. The same

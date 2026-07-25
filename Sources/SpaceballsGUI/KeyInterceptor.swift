@@ -179,6 +179,16 @@ final class KeyInterceptor {
 
 // MARK: - C callback
 
+private func dispatchNavigation(_ command: NavigationCommand, to delegate: KeyInterceptorDelegate?)
+{
+  switch command {
+  case .nextSpace: delegate?.keyInterceptorJumpToNextSpace()
+  case .previousSpace: delegate?.keyInterceptorJumpToPreviousSpace()
+  case .nextDisplay: delegate?.keyInterceptorCycleDisplayRight()
+  case .previousDisplay: delegate?.keyInterceptorCycleDisplayLeft()
+  }
+}
+
 private func keyInterceptorCallback(
   proxy: CGEventTapProxy,
   type: CGEventType,
@@ -324,34 +334,25 @@ private func keyInterceptorCallback(
       return nil  // consume
     }
 
-    // Next space (Cmd held)
-    if cmdHeld && keyCode == Int64(bindings.nextSpace) && interceptor.panelVisible {
+    // Navigation keys (Cmd held) — plain moves by space, Shift moves by display
+    if cmdHeld && interceptor.panelVisible,
+      let command = bindings.navigationCommand(
+        keyCode: UInt16(keyCode), shiftHeld: flags.contains(.maskShift))
+    {
       DispatchQueue.main.async {
-        interceptor.delegate?.keyInterceptorJumpToNextSpace()
+        dispatchNavigation(command, to: interceptor.delegate)
       }
       return nil  // consume
     }
 
-    // Previous space (Cmd held)
-    if cmdHeld && keyCode == Int64(bindings.previousSpace) && interceptor.panelVisible {
+    // Arrow keys (no Cmd) — same scheme, always on the physical arrows
+    // (the panel can outlive the Cmd hold after a suppressed confirm)
+    if !cmdHeld && interceptor.panelVisible,
+      let command = KeyBindings().navigationCommand(
+        keyCode: UInt16(keyCode), shiftHeld: flags.contains(.maskShift))
+    {
       DispatchQueue.main.async {
-        interceptor.delegate?.keyInterceptorJumpToPreviousSpace()
-      }
-      return nil  // consume
-    }
-
-    // Down arrow (no Cmd) — jump to next space
-    if !cmdHeld && keyCode == 125 && interceptor.panelVisible {
-      DispatchQueue.main.async {
-        interceptor.delegate?.keyInterceptorJumpToNextSpace()
-      }
-      return nil  // consume
-    }
-
-    // Up arrow (no Cmd) — jump to previous space
-    if !cmdHeld && keyCode == 126 && interceptor.panelVisible {
-      DispatchQueue.main.async {
-        interceptor.delegate?.keyInterceptorJumpToPreviousSpace()
+        dispatchNavigation(command, to: interceptor.delegate)
       }
       return nil  // consume
     }
@@ -420,22 +421,6 @@ private func keyInterceptorCallback(
     if cmdHeld && keyCode == 43 && interceptor.panelVisible {
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorOpenSettings()
-      }
-      return nil  // consume
-    }
-
-    // Next display
-    if cmdHeld && keyCode == Int64(bindings.nextDisplay) && interceptor.panelVisible {
-      DispatchQueue.main.async {
-        interceptor.delegate?.keyInterceptorCycleDisplayRight()
-      }
-      return nil  // consume
-    }
-
-    // Previous display
-    if cmdHeld && keyCode == Int64(bindings.previousDisplay) && interceptor.panelVisible {
-      DispatchQueue.main.async {
-        interceptor.delegate?.keyInterceptorCycleDisplayLeft()
       }
       return nil  // consume
     }

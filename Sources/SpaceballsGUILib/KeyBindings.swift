@@ -114,6 +114,19 @@ public struct KeyBindings: Codable, Equatable {
     }
   }
 
+  /// Resolves a navigation key press. All four navigation keys (defaults:
+  /// ↓ ↑ → ←) move by space when plain and by display when Shift is held —
+  /// Shift is the granularity modifier, not a separate set of bindings.
+  public func navigationCommand(keyCode: UInt16, shiftHeld: Bool) -> NavigationCommand? {
+    if keyCode == nextSpace || keyCode == nextDisplay {
+      return shiftHeld ? .nextDisplay : .nextSpace
+    }
+    if keyCode == previousSpace || keyCode == previousDisplay {
+      return shiftHeld ? .previousDisplay : .previousSpace
+    }
+    return nil
+  }
+
   /// Returns pairs of actions that share the same key code.
   public func conflicts() -> [(ShortcutAction, ShortcutAction)] {
     var seen: [UInt16: ShortcutAction] = [:]
@@ -128,6 +141,16 @@ public struct KeyBindings: Codable, Equatable {
     }
     return result
   }
+}
+
+// MARK: - Navigation Command
+
+/// What a navigation key press should do, after modifiers are applied.
+public enum NavigationCommand: Equatable {
+  case nextSpace
+  case previousSpace
+  case nextDisplay
+  case previousDisplay
 }
 
 // MARK: - Shortcut Action
@@ -150,18 +173,14 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
 
   public var id: String { rawValue }
 
-  public var isDisplayShortcut: Bool {
-    self == .nextDisplay || self == .previousDisplay
-  }
-
   public var label: String {
     switch self {
     case .activateAndNext: "Activate / Next item"
     case .previousItem: "Previous item"
     case .nextSpace: "Next space"
     case .previousSpace: "Previous space"
-    case .nextDisplay: "Next display"
-    case .previousDisplay: "Previous display"
+    case .nextDisplay: "Next space (alternate)"
+    case .previousDisplay: "Previous space (alternate)"
     case .renameSpace: "Rename space"
     case .cycleSortOrder: "Cycle sort order"
     case .createSpace: "Create space menu"
@@ -177,10 +196,10 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     switch self {
     case .activateAndNext: "Opens the panel and navigates to the next item"
     case .previousItem: "Navigates to the previous item"
-    case .nextSpace: "Jumps to the next space header"
-    case .previousSpace: "Jumps to the previous space header"
-    case .nextDisplay: "Cycles to the next display"
-    case .previousDisplay: "Cycles to the previous display"
+    case .nextSpace: "Jumps to the next space (Shift: next display)"
+    case .previousSpace: "Jumps to the previous space (Shift: previous display)"
+    case .nextDisplay: "Alternate key for the next space (Shift: next display)"
+    case .previousDisplay: "Alternate key for the previous space (Shift: previous display)"
     case .renameSpace: "Starts renaming the selected space"
     case .cycleSortOrder: "Cycles through space sort orders"
     case .createSpace: "Opens the create space menu"

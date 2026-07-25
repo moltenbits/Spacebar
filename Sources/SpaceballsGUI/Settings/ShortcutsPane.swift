@@ -8,34 +8,19 @@ struct ShortcutsPane: View {
     settings.keyBindings.conflicts()
   }
 
-  private var generalActions: [ShortcutAction] {
-    ShortcutAction.allCases.filter { !$0.isDisplayShortcut }
-  }
-
-  private var displayActions: [ShortcutAction] {
-    ShortcutAction.allCases.filter { $0.isDisplayShortcut }
-  }
-
   var body: some View {
     Form {
       Section("Keyboard Shortcuts") {
-        Text("All shortcuts use the ⌘ (Cmd) modifier.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        Text(
+          "All shortcuts use the ⌘ (Cmd) modifier. Hold ⇧ (Shift) with a navigation key to "
+            + "move by display instead of by space; outside move mode this requires "
+            + "\"Only show current display's spaces\" in Appearance."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
 
-        ForEach(generalActions) { action in
+        ForEach(ShortcutAction.allCases) { action in
           shortcutRow(for: action)
-        }
-      }
-
-      Section("Display Cycling") {
-        Text("Requires \"Only show current display's spaces\" in Appearance.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-        ForEach(displayActions) { action in
-          shortcutRow(for: action)
-            .disabled(!settings.filterSpacesByDisplay)
         }
       }
 
