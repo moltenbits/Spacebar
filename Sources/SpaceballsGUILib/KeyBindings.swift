@@ -216,7 +216,8 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     case .quitApp: "Quits the app owning the selected window"
     case .moveWindow: "Marks the selected window for moving to another space"
     case .ejectSpaces:
-      "Moves all external displays' Spaces to the built-in display for safe disconnect"
+      "Moves all external displays' Spaces to the built-in display for safe disconnect "
+        + "(Shift restores them)"
     case .showResize: "Opens the resize grid panel (Cmd+Shift)"
     case .cancel: "Dismisses the panel"
     }

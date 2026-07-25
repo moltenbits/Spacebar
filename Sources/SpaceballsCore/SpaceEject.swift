@@ -91,8 +91,18 @@ extension SpaceManager {
   /// currently connected) in one Mission Control session, clearing records
   /// as they complete. Records whose display is still disconnected are kept;
   /// records whose space no longer exists are dropped. No space is activated.
-  public func restoreEjectedSpaces(ejectStore: EjectRecordStoring) throws -> SpaceRestoreSummary {
-    let pending = ejectStore.pendingEjections()
+  ///
+  /// `onlyArmed` restricts the run to records whose display has actually been
+  /// observed absent since the eject — the auto-restore gate. Manual restores
+  /// (CLI, Cmd+Shift+E) pass false and move everything movable.
+  public func restoreEjectedSpaces(
+    ejectStore: EjectRecordStoring, onlyArmed: Bool = false
+  ) throws -> SpaceRestoreSummary {
+    var pending = ejectStore.pendingEjections()
+    if onlyArmed {
+      let armed = ejectStore.armedEjections()
+      pending = pending.filter { armed.contains($0.key) }
+    }
     guard !pending.isEmpty else { return SpaceRestoreSummary(restored: [], waiting: []) }
     guard Self.ensureAccessibilityTrusted() else {
       throw SpaceMoveError.accessibilityNotTrusted

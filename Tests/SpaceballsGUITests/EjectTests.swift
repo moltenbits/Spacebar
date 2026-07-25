@@ -194,4 +194,31 @@ struct EjectStoreTests {
     store.recordEjection(spaceUUID: "u3", originalDisplayUUID: "d2")
     #expect(store.pendingEjections() == ["u3": "d2"])
   }
+
+  @Test("Arming round-trips and clears with the record")
+  func armingRoundTrips() {
+    let (store, _) = makeStore()
+    store.recordEjection(spaceUUID: "u3", originalDisplayUUID: "d1")
+    store.recordEjection(spaceUUID: "u5", originalDisplayUUID: "d2")
+    #expect(store.armedEjections().isEmpty)
+
+    store.armEjections(spaceUUIDs: ["u3"])
+    #expect(store.armedEjections() == ["u3"])
+    // Arming leaves the records themselves untouched.
+    #expect(store.pendingEjections() == ["u3": "d1", "u5": "d2"])
+
+    store.clearEjection(spaceUUID: "u3")
+    #expect(store.armedEjections().isEmpty)
+  }
+
+  @Test("Re-recording an armed space disarms it")
+  func reRecordDisarms() {
+    let (store, _) = makeStore()
+    store.recordEjection(spaceUUID: "u3", originalDisplayUUID: "d1")
+    store.armEjections(spaceUUIDs: ["u3"])
+    // A fresh eject of the same space (its display is present again) must
+    // start unarmed — the display has to go away again before auto-restore.
+    store.recordEjection(spaceUUID: "u3", originalDisplayUUID: "d1")
+    #expect(store.armedEjections().isEmpty)
+  }
 }

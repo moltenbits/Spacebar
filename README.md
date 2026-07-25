@@ -145,6 +145,7 @@ Once running, the app lives in the background (no Dock icon). Keyboard shortcuts
 | Cmd+N | Create a new space |
 | Cmd+S | Cycle sort order (MRU / Ordinal / Name) |
 | Cmd+E | Eject: move all external displays' non-default Spaces to the built-in display |
+| Cmd+Shift+E | Restore ejected Spaces to their original displays |
 | Cmd+Shift+D | Toggle the window resize grid (works globally, no panel needed) |
 | Cmd+, | Open Settings |
 | Type | Filter windows by app name or title |
@@ -204,7 +205,11 @@ spaceballs move-space "Desktop 3" DELL  # "Desktop N" → display name substring
 moved onto the built-in display in one Mission Control session (Default Spaces stay behind as each display's
 anchor; a display that would be left empty gets one created first). Nothing is activated — the built-in
 display's current Space stays put. Each ejected Space's origin is recorded, and when the displays reconnect,
-Spaceballs automatically moves the ejected Spaces back where they came from (or run `spaceballs restore`).
+Spaceballs automatically moves the ejected Spaces back where they came from. Auto-restore is **armed per
+record**: it only fires for Spaces whose display was actually observed absent after the eject, so ejecting
+and continuing to work with the displays attached can't be undone by a stray display event (sleep/wake,
+resolution changes). **Cmd+Shift+E** (or `spaceballs restore`) restores everything movable on demand,
+armed or not.
 
 ### Resizing Windows
 

@@ -22,6 +22,7 @@ protocol KeyInterceptorDelegate: AnyObject {
   func keyInterceptorToggleMoveMode()
   func keyInterceptorToggleSpaceMoveMode()
   func keyInterceptorEjectSpaces()
+  func keyInterceptorRestoreSpaces()
   func keyInterceptorToggleCreateMenu()
   func keyInterceptorShowResize()
   func keyInterceptorResizeCommit()
@@ -408,8 +409,14 @@ private func keyInterceptorCallback(
       return nil  // consume
     }
 
-    // Eject Spaces to the built-in display
+    // Eject Spaces to the built-in display (Shift restores them)
     if cmdHeld && keyCode == Int64(bindings.ejectSpaces) && interceptor.panelVisible {
+      if flags.contains(.maskShift) {
+        DispatchQueue.main.async {
+          interceptor.delegate?.keyInterceptorRestoreSpaces()
+        }
+        return nil  // consume
+      }
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorEjectSpaces()
       }

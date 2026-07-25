@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainMenu()
 
     assignDefaultSpaceNames()
+    armEjectionRecords()
 
     keyInterceptor = KeyInterceptor()
     keyInterceptor.delegate = self
@@ -176,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Diagnostics.writeHeader(
           appVersion: self.appVersionString, spaceManager: self.viewModel.spaceManager)
         self.assignDefaultSpaceNames()
+        self.armEjectionRecords()
       }
       self.scheduleEjectionRestore()
     }
@@ -817,6 +819,13 @@ extension AppDelegate: KeyInterceptorDelegate {
     viewModel.toggleMoveMode()
   }
 
+  func keyInterceptorRestoreSpaces() {
+    guard !spaceEvacuationInFlight else { return }
+    keyInterceptor.setSuppressConfirm(true)
+    hidePanel()
+    runSpaceRestore(onlyArmed: false, showHUD: true)
+  }
+
   func keyInterceptorEjectSpaces() {
     guard !spaceEvacuationInFlight else { return }
     keyInterceptor.setSuppressConfirm(true)
@@ -855,9 +864,23 @@ extension AppDelegate: KeyInterceptorDelegate {
     }
   }
 
+  /// Arms eject records whose display is currently absent. Auto-restore only
+  /// touches ARMED records — a display must actually go away after the eject
+  /// before its spaces auto-return, so spurious display events (sleep/wake,
+  /// resolution changes) can't undo an eject whose displays never left.
+  /// Runs at launch (records persist across restarts) and on every display
+  /// reconfiguration.
+  private func armEjectionRecords() {
+    let pending = ejectStore.pendingEjections()
+    guard !pending.isEmpty else { return }
+    let connected = Set(viewModel.spaceManager.getAllSpaces().map(\.displayUUID))
+    let absent = pending.filter { !connected.contains($0.value) }.map(\.key)
+    ejectStore.armEjections(spaceUUIDs: absent)
+  }
+
   /// Debounced auto-restore: display reconfiguration fires several times per
   /// reconnect and CGS needs a beat to settle, so restoration runs once,
-  /// 2 seconds after the last event — and only when an ejected space's
+  /// 2 seconds after the last event — and only for ARMED records whose
   /// display is actually back.
   private func scheduleEjectionRestore() {
     pendingRestoreWork?.cancel()
@@ -868,7 +891,8 @@ extension AppDelegate: KeyInterceptorDelegate {
 
   private func restoreEjectedSpacesIfReady() {
     guard !spaceEvacuationInFlight else { return }
-    let pending = ejectStore.pendingEjections()
+    let armed = ejectStore.armedEjections()
+    let pending = ejectStore.pendingEjections().filter { armed.contains($0.key) }
     guard !pending.isEmpty else { return }
 
     let plan = RestorePlanner.plan(
@@ -878,8 +902,17 @@ extension AppDelegate: KeyInterceptorDelegate {
     let hasMoves = !plan.moves.isEmpty
     if !hasMoves && plan.stale.isEmpty && plan.completed.isEmpty { return }
 
+    runSpaceRestore(onlyArmed: true, showHUD: hasMoves)
+  }
+
+  /// Shared restore runner for the auto path (armed records only) and the
+  /// manual Cmd+Shift+E path (everything movable).
+  private func runSpaceRestore(onlyArmed: Bool, showHUD: Bool) {
+    let armed = ejectStore.armedEjections()
+    let hadPending = ejectStore.pendingEjections()
+      .contains { !onlyArmed || armed.contains($0.key) }
     spaceEvacuationInFlight = true
-    if hasMoves {
+    if showHUD {
       keyInterceptor.setRestoring(true)
       statusHUD.show(message: "Restoring Spaces…")
     }
@@ -887,18 +920,29 @@ extension AppDelegate: KeyInterceptorDelegate {
     DispatchQueue.global(qos: .userInteractive).async { [weak self] in
       guard let self else { return }
       let result = Result {
-        try self.viewModel.spaceManager.restoreEjectedSpaces(ejectStore: self.ejectStore)
+        try self.viewModel.spaceManager.restoreEjectedSpaces(
+          ejectStore: self.ejectStore, onlyArmed: onlyArmed)
       }
       DispatchQueue.main.async {
         self.spaceEvacuationInFlight = false
         self.keyInterceptor.setRestoring(false)
-        guard hasMoves else { return }
+        guard showHUD else { return }
         switch result {
         case .success(let summary) where !summary.restored.isEmpty:
           let count = summary.restored.count
-          self.statusHUD.show(message: "Restored \(count) Space\(count == 1 ? "" : "s")")
+          var message = "Restored \(count) Space\(count == 1 ? "" : "s")"
+          if !summary.waiting.isEmpty {
+            message += " (\(summary.waiting.count) awaiting a display)"
+          }
+          self.statusHUD.show(message: message)
+        case .success(let summary) where !summary.waiting.isEmpty:
+          self.statusHUD.show(
+            message: "\(summary.waiting.count) Space(s) awaiting a disconnected display")
         case .success:
-          self.statusHUD.show(message: "Space restore incomplete — will retry on reconnect")
+          self.statusHUD.show(
+            message: hadPending
+              ? "Space restore incomplete — will retry on reconnect"
+              : "Nothing to restore")
         case .failure(let error):
           self.statusHUD.show(message: "Restore failed: \(error.localizedDescription)")
         }
