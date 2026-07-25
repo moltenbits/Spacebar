@@ -2372,9 +2372,9 @@ public class SpaceManager {
         {
           completed.append(dragIndex)
         }
-        // Let Mission Control finish re-laying-out both bars before the
-        // next grab.
-        Thread.sleep(forTimeInterval: 0.3)
+        // Short bridge toward the next grab; the grab's own settle handles
+        // the tail of Mission Control's re-layout.
+        Thread.sleep(forTimeInterval: 0.15)
       }
       Self.dismissMissionControlIfPresent(dockElement: dockElement)
     }
@@ -2498,10 +2498,12 @@ public class SpaceManager {
     }
     Self.postMouseUp(at: dropPoint)
 
-    // Let MC commit the drop before the caller's next grab or dismissal.
-    // The session owner dismisses WITHOUT pressing any tile — pressing
-    // would switch the destination display's active space.
-    Thread.sleep(forTimeInterval: 0.5)
+    // Brief tail so the drop registers before the caller's next grab or
+    // dismissal — the drop itself commits on mouse-up, and the next grab's
+    // awaitStablePoint adaptively rides out any remaining re-layout. The
+    // session owner dismisses WITHOUT pressing any tile — pressing would
+    // switch the destination display's active space.
+    Thread.sleep(forTimeInterval: 0.2)
     return true
   }
 
