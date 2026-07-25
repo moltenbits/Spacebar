@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var windowLayoutStore: WindowLayoutStore!
   private var windowLayoutCoordinator: WindowLayoutCoordinator!
   private let ejectStore = EjectStore()
+  private let progressOverlay = ProgressOverlay()
+  private static let handsOffSubtitle =
+    "Hands off the mouse and keyboard — Mission Control is being driven automatically"
   /// One eject/restore MC session at a time; also blocks auto-restore from
   /// firing mid-eject.
   private var spaceEvacuationInFlight = false
@@ -835,7 +838,7 @@ extension AppDelegate: KeyInterceptorDelegate {
     // Block Cmd+Tab and friends during the Mission Control ballet — a panel
     // opening mid-drag would fight the synthetic mouse events.
     keyInterceptor.setRestoring(true)
-    statusHUD.show(message: "Ejecting Spaces…")
+    progressOverlay.show(message: "Ejecting Spaces…", subtitle: Self.handsOffSubtitle)
 
     DispatchQueue.global(qos: .userInteractive).async { [weak self] in
       guard let self else { return }
@@ -849,17 +852,17 @@ extension AppDelegate: KeyInterceptorDelegate {
         switch result {
         case .success(let summary):
           if summary.ejected.isEmpty && summary.failed.isEmpty {
-            self.statusHUD.show(message: "Nothing to eject")
+            self.progressOverlay.update(message: "Nothing to eject")
           } else {
             let count = summary.ejected.count
             var message = "Ejected \(count) Space\(count == 1 ? "" : "s")"
             if !summary.failed.isEmpty { message += " (\(summary.failed.count) failed)" }
-            self.statusHUD.show(message: message)
+            self.progressOverlay.update(message: message)
           }
         case .failure(let error):
-          self.statusHUD.show(message: "Eject failed: \(error.localizedDescription)")
+          self.progressOverlay.update(message: "Eject failed: \(error.localizedDescription)")
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.statusHUD.dismiss() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.progressOverlay.dismiss() }
       }
     }
   }
@@ -914,7 +917,7 @@ extension AppDelegate: KeyInterceptorDelegate {
     spaceEvacuationInFlight = true
     if showHUD {
       keyInterceptor.setRestoring(true)
-      statusHUD.show(message: "Restoring Spaces…")
+      progressOverlay.show(message: "Restoring Spaces…", subtitle: Self.handsOffSubtitle)
     }
 
     DispatchQueue.global(qos: .userInteractive).async { [weak self] in
@@ -934,19 +937,19 @@ extension AppDelegate: KeyInterceptorDelegate {
           if !summary.waiting.isEmpty {
             message += " (\(summary.waiting.count) awaiting a display)"
           }
-          self.statusHUD.show(message: message)
+          self.progressOverlay.update(message: message)
         case .success(let summary) where !summary.waiting.isEmpty:
-          self.statusHUD.show(
+          self.progressOverlay.update(
             message: "\(summary.waiting.count) Space(s) awaiting a disconnected display")
         case .success:
-          self.statusHUD.show(
+          self.progressOverlay.update(
             message: hadPending
               ? "Space restore incomplete — will retry on reconnect"
               : "Nothing to restore")
         case .failure(let error):
-          self.statusHUD.show(message: "Restore failed: \(error.localizedDescription)")
+          self.progressOverlay.update(message: "Restore failed: \(error.localizedDescription)")
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.statusHUD.dismiss() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.progressOverlay.dismiss() }
       }
     }
   }
