@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="76 63 872 872">
+  <!-- Spaceballs — white bubble crew helmet, anonymous dark opening to the rim -->
+  <g fill-rule="evenodd" transform="translate(0,60)">
+    <path d="M252,760 A390,390 0 1 1 772,760 Q512,836 252,760 Z" fill="#F4F2ED" stroke="#A7ACB6" stroke-width="10"/>
+    <path d="M352,778 L352,536 C352,444 672,444 672,536 L672,778 Q512,816 352,778 Z" fill="#191C23"/>
+  </g>
+</svg>
