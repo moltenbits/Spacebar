@@ -651,8 +651,10 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveCreateSelectionDown()
     } else if viewModel.moveMode {
       viewModel.moveMarkedWindowToNextSpace()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
       viewModel.moveMarkedSpaceToNextDisplay()
+      resizePanelsToFit()
     } else {
       viewModel.moveSelectionDown()
     }
@@ -663,8 +665,10 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveCreateSelectionUp()
     } else if viewModel.moveMode {
       viewModel.moveMarkedWindowToPreviousSpace()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
       viewModel.moveMarkedSpaceToPreviousDisplay()
+      resizePanelsToFit()
     } else {
       viewModel.moveSelectionUp()
     }
@@ -736,8 +740,10 @@ extension AppDelegate: KeyInterceptorDelegate {
   func keyInterceptorCycleDisplayLeft() {
     if viewModel.moveMode {
       viewModel.moveMarkedWindowToPreviousDisplay()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
       viewModel.moveMarkedSpaceToPreviousDisplay()
+      resizePanelsToFit()
     } else {
       cycleDisplay(forward: false)
     }
@@ -746,8 +752,10 @@ extension AppDelegate: KeyInterceptorDelegate {
   func keyInterceptorCycleDisplayRight() {
     if viewModel.moveMode {
       viewModel.moveMarkedWindowToNextDisplay()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
       viewModel.moveMarkedSpaceToNextDisplay()
+      resizePanelsToFit()
     } else {
       cycleDisplay(forward: true)
     }
@@ -758,8 +766,10 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveCreateSelectionDown()
     } else if viewModel.moveMode {
       viewModel.moveMarkedWindowToNextSpace()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
       viewModel.moveMarkedSpaceToNextDisplay()
+      resizePanelsToFit()
     } else {
       viewModel.moveToNextSpace()
     }
@@ -770,8 +780,10 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveCreateSelectionUp()
     } else if viewModel.moveMode {
       viewModel.moveMarkedWindowToPreviousSpace()
+      resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
       viewModel.moveMarkedSpaceToPreviousDisplay()
+      resizePanelsToFit()
     } else {
       viewModel.moveToPreviousSpace()
     }
