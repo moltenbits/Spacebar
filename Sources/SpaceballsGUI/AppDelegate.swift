@@ -862,9 +862,9 @@ extension AppDelegate: KeyInterceptorDelegate {
         case .failure(let error):
           self.progressOverlay.update(message: "Eject failed: \(error.localizedDescription)")
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-          self.progressOverlay.dismiss(fadingOver: 1.5)
-        }
+        // The result screen's whole lifespan is the fade: it appears and
+        // immediately starts fading, gone after 1.5s.
+        self.progressOverlay.dismiss(fadingOver: 1.5)
       }
     }
   }
@@ -951,9 +951,9 @@ extension AppDelegate: KeyInterceptorDelegate {
         case .failure(let error):
           self.progressOverlay.update(message: "Restore failed: \(error.localizedDescription)")
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-          self.progressOverlay.dismiss(fadingOver: 1.5)
-        }
+        // The result screen's whole lifespan is the fade: it appears and
+        // immediately starts fading, gone after 1.5s.
+        self.progressOverlay.dismiss(fadingOver: 1.5)
       }
     }
   }
