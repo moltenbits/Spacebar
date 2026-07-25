@@ -20,6 +20,9 @@ public struct SettingsExport: Codable {
   public var resizePresets: [ResizePreset]
   public var warpCursorOnActivation: Bool
   public var activateMovedItem: Bool
+  public var timingSpaceSwitchSettle: Double
+  public var timingDropSettle: Double
+  public var timingBetweenDrags: Double
 
   public init(
     showAppIcons: Bool, showCurrentBadge: Bool, showDisplayBadge: Bool,
@@ -30,7 +33,10 @@ public struct SettingsExport: Codable {
     resizeGridColumns: Int = 12, resizeGridRows: Int = 12,
     resizeMargins: Double = 0, resizePresets: [ResizePreset]? = nil,
     warpCursorOnActivation: Bool = false,
-    activateMovedItem: Bool = true
+    activateMovedItem: Bool = true,
+    timingSpaceSwitchSettle: Double = 0.25,
+    timingDropSettle: Double = 0.2,
+    timingBetweenDrags: Double = 0.15
   ) {
     self.showAppIcons = showAppIcons
     self.showCurrentBadge = showCurrentBadge
@@ -52,6 +58,9 @@ public struct SettingsExport: Codable {
       ?? ResizePreset.defaultPresets(gridColumns: resizeGridColumns, gridRows: resizeGridRows)
     self.warpCursorOnActivation = warpCursorOnActivation
     self.activateMovedItem = activateMovedItem
+    self.timingSpaceSwitchSettle = timingSpaceSwitchSettle
+    self.timingDropSettle = timingDropSettle
+    self.timingBetweenDrags = timingBetweenDrags
   }
 
   public static func from(settings: AppSettings) -> SettingsExport {
@@ -73,7 +82,10 @@ public struct SettingsExport: Codable {
       resizeMargins: settings.resizeMargins,
       resizePresets: settings.resizePresets,
       warpCursorOnActivation: settings.warpCursorOnActivation,
-      activateMovedItem: settings.activateMovedItem
+      activateMovedItem: settings.activateMovedItem,
+      timingSpaceSwitchSettle: settings.timingSpaceSwitchSettle,
+      timingDropSettle: settings.timingDropSettle,
+      timingBetweenDrags: settings.timingBetweenDrags
     )
   }
 
@@ -96,6 +108,9 @@ public struct SettingsExport: Codable {
     settings.resizePresets = resizePresets
     settings.warpCursorOnActivation = warpCursorOnActivation
     settings.activateMovedItem = activateMovedItem
+    settings.timingSpaceSwitchSettle = timingSpaceSwitchSettle
+    settings.timingDropSettle = timingDropSettle
+    settings.timingBetweenDrags = timingBetweenDrags
   }
 
   // Support importing legacy exports that used customSpaceNames: [String]
@@ -106,6 +121,9 @@ public struct SettingsExport: Codable {
     case resizeGridColumns, resizeGridRows, resizeMargins, resizePresets
     case warpCursorOnActivation
     case activateMovedItem
+    case timingSpaceSwitchSettle
+    case timingDropSettle
+    case timingBetweenDrags
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -128,6 +146,9 @@ public struct SettingsExport: Codable {
     try c.encode(resizePresets, forKey: .resizePresets)
     try c.encode(warpCursorOnActivation, forKey: .warpCursorOnActivation)
     try c.encode(activateMovedItem, forKey: .activateMovedItem)
+    try c.encode(timingSpaceSwitchSettle, forKey: .timingSpaceSwitchSettle)
+    try c.encode(timingDropSettle, forKey: .timingDropSettle)
+    try c.encode(timingBetweenDrags, forKey: .timingBetweenDrags)
   }
 
   public init(from decoder: Decoder) throws {
@@ -163,6 +184,12 @@ public struct SettingsExport: Codable {
       try c.decodeIfPresent(Bool.self, forKey: .warpCursorOnActivation) ?? false
     activateMovedItem =
       try c.decodeIfPresent(Bool.self, forKey: .activateMovedItem) ?? true
+    timingSpaceSwitchSettle =
+      try c.decodeIfPresent(Double.self, forKey: .timingSpaceSwitchSettle) ?? 0.25
+    timingDropSettle =
+      try c.decodeIfPresent(Double.self, forKey: .timingDropSettle) ?? 0.2
+    timingBetweenDrags =
+      try c.decodeIfPresent(Double.self, forKey: .timingBetweenDrags) ?? 0.15
   }
 
   public static func exportJSON(settings: AppSettings) throws -> Data {

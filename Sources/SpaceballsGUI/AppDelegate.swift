@@ -139,6 +139,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
       .store(in: &cancellables)
 
+    viewModel.spaceManager.moveTiming = appSettings.moveTiming
+
+    Publishers.CombineLatest3(
+      appSettings.$timingSpaceSwitchSettle,
+      appSettings.$timingDropSettle,
+      appSettings.$timingBetweenDrags
+    )
+    .dropFirst()
+    .sink { [weak self] settle, drop, between in
+      self?.viewModel.spaceManager.moveTiming = SpaceMoveTiming(
+        preSwitchSettle: settle, dropSettle: drop, interDragPause: between)
+    }
+    .store(in: &cancellables)
+
     // Dismiss on click outside any panel
     clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
       [weak self] event in

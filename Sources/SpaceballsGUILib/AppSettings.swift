@@ -186,6 +186,27 @@ public final class AppSettings: ObservableObject {
     didSet { defaults.set(activateMovedItem, forKey: "activateMovedItem") }
   }
 
+  /// Mission Control timing knobs (seconds) — see SpaceMoveTiming in Core.
+  @Published public var timingSpaceSwitchSettle: Double {
+    didSet { defaults.set(timingSpaceSwitchSettle, forKey: "timingSpaceSwitchSettle") }
+  }
+
+  @Published public var timingDropSettle: Double {
+    didSet { defaults.set(timingDropSettle, forKey: "timingDropSettle") }
+  }
+
+  @Published public var timingBetweenDrags: Double {
+    didSet { defaults.set(timingBetweenDrags, forKey: "timingBetweenDrags") }
+  }
+
+  /// The timing knobs bridged into Core's config type.
+  public var moveTiming: SpaceMoveTiming {
+    SpaceMoveTiming(
+      preSwitchSettle: timingSpaceSwitchSettle,
+      dropSettle: timingDropSettle,
+      interDragPause: timingBetweenDrags)
+  }
+
   // MARK: - Diagnostics
 
   /// Master switch. When off, `Diagnostics.log(...)` calls are no-ops. Default off.
@@ -225,6 +246,9 @@ public final class AppSettings: ObservableObject {
       "rememberWindowLayouts": true,
       "warpCursorOnActivation": false,
       "activateMovedItem": true,
+      "timingSpaceSwitchSettle": 0.25,
+      "timingDropSettle": 0.2,
+      "timingBetweenDrags": 0.15,
     ])
 
     self.showAppIcons = defaults.bool(forKey: "showAppIcons")
@@ -241,6 +265,9 @@ public final class AppSettings: ObservableObject {
       SpaceSortOrder(rawValue: defaults.string(forKey: "spaceSortOrder") ?? "") ?? .mru
     self.warpCursorOnActivation = defaults.bool(forKey: "warpCursorOnActivation")
     self.activateMovedItem = defaults.bool(forKey: "activateMovedItem")
+    self.timingSpaceSwitchSettle = defaults.double(forKey: "timingSpaceSwitchSettle")
+    self.timingDropSettle = defaults.double(forKey: "timingDropSettle")
+    self.timingBetweenDrags = defaults.double(forKey: "timingBetweenDrags")
 
     // Load workspaces (with migration from old customSpaceNames format)
     if let data = defaults.data(forKey: "workspaces"),

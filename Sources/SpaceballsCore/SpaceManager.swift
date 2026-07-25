@@ -73,6 +73,10 @@ public class SpaceManager {
   /// Bundle IDs of `.regular` apps the user wants hidden from Spaceballs.
   public var excludedBundleIDs: Set<String> = []
 
+  /// User-tunable pauses for the Mission Control drag flows (space moves,
+  /// eject, restore). See SpaceMoveTiming for the knobs and their defaults.
+  public var moveTiming = SpaceMoveTiming()
+
   public init(dataSource: SystemDataSource = CGSDataSource()) {
     self.dataSource = dataSource
   }
@@ -2294,6 +2298,7 @@ public class SpaceManager {
 
     let semaphore = DispatchSemaphore(value: 0)
     var completed: [Int] = []
+    let timing = moveTiming
 
     DispatchQueue.global(qos: .userInteractive).async {
       defer { semaphore.signal() }
@@ -2380,13 +2385,14 @@ public class SpaceManager {
         }
         if Self.performSpaceTileDrag(
           sourceBar: sourceBar, targetBar: targetBar,
-          sourceSpaceIndex: sourceIndex, verbose: verbose)
+          sourceSpaceIndex: sourceIndex, dropSettle: timing.dropSettle,
+          verbose: verbose)
         {
           completed.append(dragIndex)
         }
         // Short bridge toward the next grab; the grab's own settle handles
         // the tail of Mission Control's re-layout.
-        Thread.sleep(forTimeInterval: 0.15)
+        Thread.sleep(forTimeInterval: timing.interDragPause)
       }
       Self.dismissMissionControlIfPresent(dockElement: dockElement)
     }
@@ -2400,7 +2406,7 @@ public class SpaceManager {
   /// that's the session owner's job.
   private static func performSpaceTileDrag(
     sourceBar: AXUIElement, targetBar: AXUIElement,
-    sourceSpaceIndex: Int, verbose: Bool
+    sourceSpaceIndex: Int, dropSettle: TimeInterval, verbose: Bool
   ) -> Bool {
     // Locate the tile by index among the bar's desktop tiles (fullscreen
     // spaces show app-titled tiles in the same bar and don't count), then
@@ -2515,7 +2521,7 @@ public class SpaceManager {
     // awaitStablePoint adaptively rides out any remaining re-layout. The
     // session owner dismisses WITHOUT pressing any tile — pressing would
     // switch the destination display's active space.
-    Thread.sleep(forTimeInterval: 0.2)
+    Thread.sleep(forTimeInterval: dropSettle)
     return true
   }
 

@@ -1,6 +1,29 @@
 import CoreGraphics
 import Foundation
 
+/// User-tunable pauses used while driving Mission Control (space moves,
+/// eject, restore). The defaults sit near the practical floor — lower is
+/// faster, too low and drags start to misfire.
+public struct SpaceMoveTiming: Equatable {
+  /// Pause after a verified display switch (Mission Control fully
+  /// dismissed) before the next Mission Control round.
+  public var preSwitchSettle: TimeInterval
+  /// Pause after dropping a tile, before the next grab or dismissal.
+  public var dropSettle: TimeInterval
+  /// Pause between consecutive tile drags in one batch session.
+  public var interDragPause: TimeInterval
+
+  public init(
+    preSwitchSettle: TimeInterval = 0.25,
+    dropSettle: TimeInterval = 0.2,
+    interDragPause: TimeInterval = 0.15
+  ) {
+    self.preSwitchSettle = preSwitchSettle
+    self.dropSettle = dropSettle
+    self.interDragPause = interDragPause
+  }
+}
+
 /// One tile drag within a Mission Control batch session.
 public struct SpaceTileDrag {
   public let sourceSpaceIndex: Int
@@ -163,7 +186,7 @@ extension SpaceManager {
       // rather than toggle-close; the short tail only bridges any lag
       // between the AX group vanishing and the Dock's internal state flip.
       Self.awaitMissionControlDismissed(timeout: 2.0)
-      Thread.sleep(forTimeInterval: 0.25)
+      Thread.sleep(forTimeInterval: moveTiming.preSwitchSettle)
     }
 
     var drags: [SpaceTileDrag] = []
@@ -242,7 +265,7 @@ extension SpaceManager {
           Diagnostics.log("eject", "reactivating \(spaceUUID) on \(displayUUID) failed: \(error)")
         }
         Self.awaitMissionControlDismissed(timeout: 2.0)
-        Thread.sleep(forTimeInterval: 0.25)
+        Thread.sleep(forTimeInterval: moveTiming.preSwitchSettle)
       }
       ejectStore.clearActiveSpace(displayUUID: displayUUID)
     }
