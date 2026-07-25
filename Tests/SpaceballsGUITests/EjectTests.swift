@@ -66,7 +66,10 @@ struct EjectPlannerTests {
     let plan = EjectPlanner.plan(spaces: spaces, targetDisplayUUID: "b", names: names)
     // d1's current space ("Work", index 1) is being ejected; its Default
     // Space sits at index 0. d2 has no default yet, so no pre-switch there.
-    #expect(plan.preSwitches == [EjectPlanner.PreSwitch(displayUUID: "d1", toSpaceIndex: 0)])
+    #expect(
+      plan.preSwitches == [
+        EjectPlanner.PreSwitch(displayUUID: "d1", toSpaceIndex: 0, toSpaceID: 2)
+      ])
   }
 
   @Test("A display already sitting on its Default Space needs no pre-switch")
@@ -156,7 +159,10 @@ struct RestorePlannerTests {
     let plan = RestorePlanner.plan(spaces: spaces, pending: pending)
     // Space 3 is builtin's current space and is being restored — switch the
     // display to its first non-restored desktop (space 1, index 0) first.
-    #expect(plan.preSwitches == [EjectPlanner.PreSwitch(displayUUID: "b", toSpaceIndex: 0)])
+    #expect(
+      plan.preSwitches == [
+        EjectPlanner.PreSwitch(displayUUID: "b", toSpaceIndex: 0, toSpaceID: 1)
+      ])
   }
 }
 

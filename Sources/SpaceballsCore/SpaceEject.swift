@@ -122,18 +122,26 @@ extension SpaceManager {
   ) -> [EjectPlanner.Move] {
     guard !moves.isEmpty else { return [] }
 
-    // MC refuses to drag a display's current space; switch those displays
-    // onto a staying space first and verify via CGS before opening MC.
-    if !preSwitches.isEmpty {
-      for preSwitch in preSwitches {
-        guard let screen = Self.displayIDForUUID(preSwitch.displayUUID) else { continue }
-        switchToSpace(spaceIndex: preSwitch.toSpaceIndex, screenNumber: screen)
+    // MC refuses to drag a display's current space, so FIRST park each
+    // affected display on a staying space. switchToSpace presses a tile in
+    // its own Mission Control appearance — and the awake notification that
+    // opens MC is a TOGGLE — so the switches run strictly one at a time,
+    // each verified via CGS and waited out until Mission Control is fully
+    // gone, before the next switch (or the drag session) opens MC again.
+    for preSwitch in preSwitches {
+      guard let screen = Self.displayIDForUUID(preSwitch.displayUUID) else { continue }
+      switchToSpace(spaceIndex: preSwitch.toSpaceIndex, screenNumber: screen)
+      let switched = poll(timeout: 3.0) {
+        self.getAllSpaces().first(where: {
+          $0.displayUUID == preSwitch.displayUUID && $0.isCurrent
+        })?.id == preSwitch.toSpaceID
       }
-      let movingIDs = Set(moves.map(\.spaceID))
-      _ = poll(timeout: 3.0) {
-        self.getAllSpaces().allSatisfy { !(movingIDs.contains($0.id) && $0.isCurrent) }
+      if !switched {
+        Diagnostics.log(
+          "eject", "pre-switch of \(preSwitch.displayUUID) not confirmed — continuing")
       }
-      // Let the space-switch animation finish before opening MC.
+      Self.awaitMissionControlDismissed(timeout: 2.0)
+      // Let the space-switch animation finish before the next MC round.
       Thread.sleep(forTimeInterval: 0.8)
     }
 
@@ -150,11 +158,28 @@ extension SpaceManager {
       dragMoves.append(move)
     }
 
-    let attempted = moveSpacesInMCBatch(drags).map { dragMoves[$0] }
+    // Each completed drop shifts the tiles remaining in its source bar, so
+    // every drag re-derives its tile index from a fresh CGS read. When CGS
+    // reflects drops live, that's the true post-shift position; when it
+    // lags, the read returns the planned index — which the DESCENDING
+    // per-display order keeps correct regardless.
+    let attemptedIndices = moveSpacesInMCBatch(drags) { dragIndex in
+      let move = dragMoves[dragIndex]
+      let spaces = self.getAllSpaces()
+      guard
+        let space = spaces.first(where: { $0.id == move.spaceID }),
+        space.displayUUID == move.sourceDisplayUUID
+      else { return nil }  // already landed elsewhere, or gone — skip
+      return
+        spaces
+        .filter { $0.type == .desktop && $0.displayUUID == move.sourceDisplayUUID }
+        .firstIndex(where: { $0.id == move.spaceID })
+    }
+    let attempted = attemptedIndices.map { dragMoves[$0] }
 
     // The drops animate before CGS reflects the new topology — poll until
     // every attempted move is visible (or the scaled timeout elapses), then
-    // report only what actually landed.
+    // report everything that actually landed, attempted or not.
     _ = poll(timeout: 2.0 + 0.5 * Double(attempted.count)) {
       let spaces = self.getAllSpaces()
       return attempted.allSatisfy { move in
@@ -162,7 +187,7 @@ extension SpaceManager {
       }
     }
     let finalSpaces = getAllSpaces()
-    return attempted.filter { move in
+    return moves.filter { move in
       finalSpaces.first(where: { $0.id == move.spaceID })?.displayUUID
         == move.targetDisplayUUID
     }

@@ -2267,7 +2267,13 @@ public class SpaceManager {
   /// DESCENDING sourceSpaceIndex — completed removals then never shift the
   /// tile indices of drags still to run. The drop aims at the target bar's
   /// frame center, so a target bar gaining tiles never goes stale.
-  public func moveSpacesInMCBatch(_ drags: [SpaceTileDrag], verbose: Bool = false) -> [Int] {
+  /// `resolveSourceIndex` (optional) re-derives a drag's tile index just
+  /// before its grab — completed drops shift the remaining tiles, so a
+  /// fresh read beats the planned index; returning nil skips the drag.
+  public func moveSpacesInMCBatch(
+    _ drags: [SpaceTileDrag], verbose: Bool = false,
+    resolveSourceIndex: ((_ dragIndex: Int) -> Int?)? = nil
+  ) -> [Int] {
     guard !drags.isEmpty else { return [] }
     guard AXIsProcessTrusted() else {
       print("moveSpacesInMCBatch: Accessibility not trusted")
@@ -2290,6 +2296,15 @@ public class SpaceManager {
       }
 
       let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+
+      // A lingering Mission Control (pre-switch tile press still closing, a
+      // failed earlier attempt, or user-opened) would turn the awake TOGGLE
+      // into a dismissal — make sure it's fully gone, then open fresh.
+      if Self.axChildWithIdentifier(dockElement, identifier: "mc") != nil {
+        Self.dismissMissionControl()
+        _ = Self.awaitMissionControlDismissed(timeout: 2.0)
+        Thread.sleep(forTimeInterval: 0.5)
+      }
       CoreDockSendNotification("com.apple.expose.awake" as CFString)
 
       let mcGroup: AXUIElement? = {
@@ -2345,9 +2360,15 @@ public class SpaceManager {
           print("moveSpacesInMCBatch: displays for drag \(dragIndex) not found")
           continue
         }
+        let sourceIndex: Int? =
+          resolveSourceIndex.map { $0(dragIndex) } ?? drag.sourceSpaceIndex
+        guard let sourceIndex else {
+          if verbose { print("moveSpacesInMCBatch: drag \(dragIndex) skipped") }
+          continue
+        }
         if Self.performSpaceTileDrag(
           sourceBar: sourceBar, targetBar: targetBar,
-          sourceSpaceIndex: drag.sourceSpaceIndex, verbose: verbose)
+          sourceSpaceIndex: sourceIndex, verbose: verbose)
         {
           completed.append(dragIndex)
         }
@@ -2491,6 +2512,30 @@ public class SpaceManager {
     if axChildWithIdentifier(dockElement, identifier: "mc") != nil {
       dismissMissionControl()
     }
+  }
+
+  /// True when the Dock currently exposes a Mission Control AX group.
+  static func missionControlPresent() -> Bool {
+    guard
+      let dockApp = NSRunningApplication.runningApplications(
+        withBundleIdentifier: "com.apple.dock"
+      ).first
+    else { return false }
+    let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+    return axChildWithIdentifier(dockElement, identifier: "mc") != nil
+  }
+
+  /// Polls until Mission Control's AX group disappears from the Dock.
+  /// Sequencing guard for flows that must not send the awake TOGGLE while a
+  /// previous Mission Control appearance is still closing.
+  @discardableResult
+  static func awaitMissionControlDismissed(timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if !missionControlPresent() { return true }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    return !missionControlPresent()
   }
 
   // MARK: - Mission Control Diagnostics
