@@ -494,9 +494,18 @@ struct SwitcherView: View {
       // "no windows" in the app content area
       Text("")
         .frame(width: 110, alignment: .trailing)
+      if appSettings.showAppIcons {
+        Color.clear
+          .frame(width: appSettings.iconSize, height: appSettings.iconSize)
+      }
       Text("Empty")
         .font(.system(size: noWindowsSize))
         .foregroundStyle(.tertiary)
+      // Invisible text at the window-title size so this row is exactly as
+      // tall as a window row even with app icons hidden.
+      Text(verbatim: " ")
+        .font(.system(size: CGFloat(appSettings.textSize)))
+        .frame(width: 0)
     }
     .padding(.vertical, 1)
     .padding(.horizontal, 10)
