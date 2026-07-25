@@ -59,6 +59,30 @@ final class ProgressOverlay {
     }
   }
 
+  /// Fades every panel out over `duration`, then removes them. A show()
+  /// arriving mid-fade takes over cleanly: it builds fresh panels while the
+  /// old ones finish fading on their own.
+  func dismiss(fadingOver duration: TimeInterval) {
+    DispatchQueue.main.async { [self] in
+      let fading = panels
+      panels.removeAll()
+      guard !fading.isEmpty else { return }
+      NSAnimationContext.runAnimationGroup(
+        { context in
+          context.duration = duration
+          for panel in fading {
+            panel.animator().alphaValue = 0
+          }
+        },
+        completionHandler: {
+          for panel in fading {
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+          }
+        })
+    }
+  }
+
   private func dismissPanels() {
     for panel in panels {
       panel.orderOut(nil)
