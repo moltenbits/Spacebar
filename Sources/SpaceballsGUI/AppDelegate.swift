@@ -20,6 +20,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var cancellables = Set<AnyCancellable>()
   var windowLayoutStore: WindowLayoutStore!
   private var windowLayoutCoordinator: WindowLayoutCoordinator!
+  private let ejectStore = EjectStore()
+  /// One eject/restore MC session at a time; also blocks auto-restore from
+  /// firing mid-eject.
+  private var spaceEvacuationInFlight = false
+  private var pendingRestoreWork: DispatchWorkItem?
   private var permissionsCoordinator: PermissionsCoordinator!
   private var permissionsGrantTimer: Timer?
 
@@ -172,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           appVersion: self.appVersionString, spaceManager: self.viewModel.spaceManager)
         self.assignDefaultSpaceNames()
       }
+      self.scheduleEjectionRestore()
     }
 
     NSWorkspace.shared.notificationCenter.addObserver(
@@ -809,6 +815,96 @@ extension AppDelegate: KeyInterceptorDelegate {
 
   func keyInterceptorToggleMoveMode() {
     viewModel.toggleMoveMode()
+  }
+
+  func keyInterceptorEjectSpaces() {
+    guard !spaceEvacuationInFlight else { return }
+    keyInterceptor.setSuppressConfirm(true)
+    hidePanel()
+
+    spaceEvacuationInFlight = true
+    // Block Cmd+Tab and friends during the Mission Control ballet — a panel
+    // opening mid-drag would fight the synthetic mouse events.
+    keyInterceptor.setRestoring(true)
+    statusHUD.show(message: "Ejecting Spaces…")
+
+    DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+      guard let self else { return }
+      let result = Result {
+        try self.viewModel.spaceManager.ejectSpaces(
+          spaceNameStore: self.spaceNameStore, ejectStore: self.ejectStore)
+      }
+      DispatchQueue.main.async {
+        self.spaceEvacuationInFlight = false
+        self.keyInterceptor.setRestoring(false)
+        switch result {
+        case .success(let summary):
+          if summary.ejected.isEmpty && summary.failed.isEmpty {
+            self.statusHUD.show(message: "Nothing to eject")
+          } else {
+            let count = summary.ejected.count
+            var message = "Ejected \(count) Space\(count == 1 ? "" : "s")"
+            if !summary.failed.isEmpty { message += " (\(summary.failed.count) failed)" }
+            self.statusHUD.show(message: message)
+          }
+        case .failure(let error):
+          self.statusHUD.show(message: "Eject failed: \(error.localizedDescription)")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.statusHUD.dismiss() }
+      }
+    }
+  }
+
+  /// Debounced auto-restore: display reconfiguration fires several times per
+  /// reconnect and CGS needs a beat to settle, so restoration runs once,
+  /// 2 seconds after the last event — and only when an ejected space's
+  /// display is actually back.
+  private func scheduleEjectionRestore() {
+    pendingRestoreWork?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.restoreEjectedSpacesIfReady() }
+    pendingRestoreWork = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+  }
+
+  private func restoreEjectedSpacesIfReady() {
+    guard !spaceEvacuationInFlight else { return }
+    let pending = ejectStore.pendingEjections()
+    guard !pending.isEmpty else { return }
+
+    let plan = RestorePlanner.plan(
+      spaces: viewModel.spaceManager.getAllSpaces(), pending: pending)
+    // Stale/already-home records still need clearing even when nothing
+    // moves, but only a real move warrants the HUD and input blocking.
+    let hasMoves = !plan.moves.isEmpty
+    if !hasMoves && plan.stale.isEmpty && plan.completed.isEmpty { return }
+
+    spaceEvacuationInFlight = true
+    if hasMoves {
+      keyInterceptor.setRestoring(true)
+      statusHUD.show(message: "Restoring Spaces…")
+    }
+
+    DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+      guard let self else { return }
+      let result = Result {
+        try self.viewModel.spaceManager.restoreEjectedSpaces(ejectStore: self.ejectStore)
+      }
+      DispatchQueue.main.async {
+        self.spaceEvacuationInFlight = false
+        self.keyInterceptor.setRestoring(false)
+        guard hasMoves else { return }
+        switch result {
+        case .success(let summary) where !summary.restored.isEmpty:
+          let count = summary.restored.count
+          self.statusHUD.show(message: "Restored \(count) Space\(count == 1 ? "" : "s")")
+        case .success:
+          self.statusHUD.show(message: "Space restore incomplete — will retry on reconnect")
+        case .failure(let error):
+          self.statusHUD.show(message: "Restore failed: \(error.localizedDescription)")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.statusHUD.dismiss() }
+      }
+    }
   }
 
   func keyInterceptorToggleSpaceMoveMode() {

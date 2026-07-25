@@ -88,6 +88,7 @@ way while building Spaceballs:
 - **Move windows between Spaces** — Cmd+M to mark a window, navigate to the target space, release to move (no SIP required)
 - **Move Spaces between displays** — Cmd+Shift+M to mark a Space, arrow to the target display, release to move
 - **Stable Default Spaces** — each external display's fresh space is auto-named "Default Space" and pinned to its display, so a display always keeps an anchor space and any named Space can be moved off it without first creating a sibling (rename a Default Space to unpin it; the built-in display is exempt)
+- **Eject before disconnect** — Cmd+E (or `spaceballs eject`) sweeps every non-default Space from all external displays onto the built-in display in a single Mission Control pass, so disconnecting doesn't scatter windows into random Spaces; on reconnect, ejected Spaces are automatically restored to the displays they came from (`spaceballs restore` does it manually)
 - **Window resizing** — Cmd+Shift+D opens a grid overlay for the focused window: drag cells to resize, or apply
   configurable presets (pressing a preset again cycles it across screens)
 - **Keyboard-driven** — Cmd+Tab to cycle, Cmd+\` to go back; all shortcuts customizable in Settings
@@ -143,6 +144,7 @@ Once running, the app lives in the background (no Dock icon). Keyboard shortcuts
 | Cmd+R | Rename selected space (Enter to save, Escape to cancel) |
 | Cmd+N | Create a new space |
 | Cmd+S | Cycle sort order (MRU / Ordinal / Name) |
+| Cmd+E | Eject: move all external displays' non-default Spaces to the built-in display |
 | Cmd+Shift+D | Toggle the window resize grid (works globally, no panel needed) |
 | Cmd+, | Open Settings |
 | Type | Filter windows by app name or title |
@@ -196,6 +198,13 @@ From the CLI:
 spaceballs move-space "Work" 2          # Space name → 2nd display
 spaceballs move-space "Desktop 3" DELL  # "Desktop N" → display name substring
 ```
+
+**Ejecting before disconnect:** macOS dumps a disconnected display's windows into arbitrary Spaces. **Cmd+E**
+(or `spaceballs eject`) prepares for a safe disconnect: every non-default Space on every external display is
+moved onto the built-in display in one Mission Control session (Default Spaces stay behind as each display's
+anchor; a display that would be left empty gets one created first). Nothing is activated — the built-in
+display's current Space stays put. Each ejected Space's origin is recorded, and when the displays reconnect,
+Spaceballs automatically moves the ejected Spaces back where they came from (or run `spaceballs restore`).
 
 ### Resizing Windows
 

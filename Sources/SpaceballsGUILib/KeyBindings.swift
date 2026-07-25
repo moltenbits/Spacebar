@@ -15,6 +15,7 @@ public struct KeyBindings: Codable, Equatable {
   public var closeWindow: UInt16
   public var quitApp: UInt16
   public var moveWindow: UInt16
+  public var ejectSpaces: UInt16
   public var showResize: UInt16
   public var cancel: UInt16
 
@@ -31,6 +32,7 @@ public struct KeyBindings: Codable, Equatable {
     closeWindow: UInt16 = 13,
     quitApp: UInt16 = 12,
     moveWindow: UInt16 = 46,
+    ejectSpaces: UInt16 = 14,
     showResize: UInt16 = 2,
     cancel: UInt16 = 53
   ) {
@@ -46,6 +48,7 @@ public struct KeyBindings: Codable, Equatable {
     self.closeWindow = closeWindow
     self.quitApp = quitApp
     self.moveWindow = moveWindow
+    self.ejectSpaces = ejectSpaces
     self.showResize = showResize
     self.cancel = cancel
   }
@@ -65,6 +68,7 @@ public struct KeyBindings: Codable, Equatable {
     closeWindow = try c.decodeIfPresent(UInt16.self, forKey: .closeWindow) ?? 13
     quitApp = try c.decodeIfPresent(UInt16.self, forKey: .quitApp) ?? 12
     moveWindow = try c.decodeIfPresent(UInt16.self, forKey: .moveWindow) ?? 46
+    ejectSpaces = try c.decodeIfPresent(UInt16.self, forKey: .ejectSpaces) ?? 14
     showResize = try c.decodeIfPresent(UInt16.self, forKey: .showResize) ?? 2
     cancel = try c.decodeIfPresent(UInt16.self, forKey: .cancel) ?? 53
   }
@@ -72,7 +76,7 @@ public struct KeyBindings: Codable, Equatable {
   private enum CodingKeys: String, CodingKey {
     case activateAndNext, previousItem, nextSpace, previousSpace
     case nextDisplay, previousDisplay, renameSpace, cycleSortOrder
-    case createSpace, closeWindow, quitApp, moveWindow, showResize, cancel
+    case createSpace, closeWindow, quitApp, moveWindow, ejectSpaces, showResize, cancel
   }
 
   public subscript(action: ShortcutAction) -> UInt16 {
@@ -90,6 +94,7 @@ public struct KeyBindings: Codable, Equatable {
       case .closeWindow: closeWindow
       case .quitApp: quitApp
       case .moveWindow: moveWindow
+      case .ejectSpaces: ejectSpaces
       case .showResize: showResize
       case .cancel: cancel
       }
@@ -108,6 +113,7 @@ public struct KeyBindings: Codable, Equatable {
       case .closeWindow: closeWindow = newValue
       case .quitApp: quitApp = newValue
       case .moveWindow: moveWindow = newValue
+      case .ejectSpaces: ejectSpaces = newValue
       case .showResize: showResize = newValue
       case .cancel: cancel = newValue
       }
@@ -169,6 +175,7 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
   case closeWindow
   case quitApp
   case moveWindow
+  case ejectSpaces
   case showResize
   case cancel
 
@@ -188,6 +195,7 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     case .closeWindow: "Close window"
     case .quitApp: "Quit app"
     case .moveWindow: "Move window"
+    case .ejectSpaces: "Eject Spaces"
     case .showResize: "Show resize grid"
     case .cancel: "Cancel"
     }
@@ -207,6 +215,8 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     case .closeWindow: "Closes the selected window (Shift closes the space)"
     case .quitApp: "Quits the app owning the selected window"
     case .moveWindow: "Marks the selected window for moving to another space"
+    case .ejectSpaces:
+      "Moves all external displays' Spaces to the built-in display for safe disconnect"
     case .showResize: "Opens the resize grid panel (Cmd+Shift)"
     case .cancel: "Dismisses the panel"
     }
