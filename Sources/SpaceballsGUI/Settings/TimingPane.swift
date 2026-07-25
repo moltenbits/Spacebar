@@ -20,19 +20,22 @@ struct TimingPane: View {
         .foregroundStyle(.secondary)
 
         timingRow(
-          "Space-switch settle",
-          description: "After switching a display to a staying Space, before the next "
-            + "Mission Control round",
+          "After activating a Space",
+          description: "A Space can't be moved while it's the active one, so Spaceballs "
+            + "first activates another Space on that display. This is the pause after "
+            + "that activation, before Mission Control reopens.",
           value: $settings.timingSpaceSwitchSettle)
 
         timingRow(
-          "Drop settle",
-          description: "After dropping a Space tile, before the next grab or dismissal",
+          "After dropping a Space",
+          description: "Pause after a dragged Space is released on its destination "
+            + "display, giving Mission Control a moment to register the drop.",
           value: $settings.timingDropSettle)
 
         timingRow(
-          "Between drags",
-          description: "Between consecutive tile drags in one Mission Control session",
+          "Before the next drag",
+          description: "Extra pause before picking up the next Space when several are "
+            + "moved in one pass (eject and restore).",
           value: $settings.timingBetweenDrags)
       }
 
