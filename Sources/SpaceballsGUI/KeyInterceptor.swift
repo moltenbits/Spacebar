@@ -35,10 +35,18 @@ protocol KeyInterceptorDelegate: AnyObject {
 /// the dead tap, freezing keyboard/mouse input system-wide.
 private var activeEventTap: CFMachPort?
 
+/// MouseInputBlocker's tap, registered here so the signal handler also
+/// releases a mouse block on SIGTERM/SIGINT/SIGHUP.
+var activeMouseBlockerTap: CFMachPort?
+
 private func signalHandler(_ signal: Int32) {
   if let tap = activeEventTap {
     CGEvent.tapEnable(tap: tap, enable: false)
     activeEventTap = nil
+  }
+  if let tap = activeMouseBlockerTap {
+    CGEvent.tapEnable(tap: tap, enable: false)
+    activeMouseBlockerTap = nil
   }
   // Re-raise with default handler so the process actually terminates
   Darwin.signal(signal, SIG_DFL)

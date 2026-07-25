@@ -1567,14 +1567,14 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .leftMouseDown,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      down.post(tap: .cghidEventTap)
+      postTagged(down)
     }
     Thread.sleep(forTimeInterval: 0.05)
     if let up = CGEvent(
       mouseEventSource: nil, mouseType: .leftMouseUp,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      up.post(tap: .cghidEventTap)
+      postTagged(up)
     }
   }
 
@@ -1609,6 +1609,18 @@ public class SpaceManager {
 
   // MARK: - CGEvent Mouse Simulation
 
+  /// Magic value stamped into `eventSourceUserData` on every synthetic mouse
+  /// event Spaceballs posts. Real input devices never set this field, so a
+  /// suppression tap (MouseInputBlocker) can pass Spaceballs's own drags
+  /// through while consuming physical mouse input.
+  public static let syntheticEventTag: Int64 = 0x5BACE
+
+  /// Tags a synthetic mouse event as Spaceballs-generated and posts it.
+  private static func postTagged(_ event: CGEvent) {
+    event.setIntegerValueField(.eventSourceUserData, value: syntheticEventTag)
+    event.post(tap: .cghidEventTap)
+  }
+
   /// Moves the cursor to a point without any button press (e.g. to hover-expand
   /// Mission Control's spaces bar).
   static func postMouseMove(at point: CGPoint) {
@@ -1616,7 +1628,7 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .mouseMoved,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      move.post(tap: .cghidEventTap)
+      postTagged(move)
     }
   }
 
@@ -1629,7 +1641,7 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .leftMouseDown,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      down.post(tap: .cghidEventTap)
+      postTagged(down)
     }
     Thread.sleep(forTimeInterval: 0.1)
   }
@@ -1640,7 +1652,7 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .leftMouseDragged,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      drag.post(tap: .cghidEventTap)
+      postTagged(drag)
     }
   }
 
@@ -1737,7 +1749,7 @@ public class SpaceManager {
       mouseEventSource: nil, mouseType: .leftMouseUp,
       mouseCursorPosition: point, mouseButton: .left)
     {
-      up.post(tap: .cghidEventTap)
+      postTagged(up)
     }
   }
 

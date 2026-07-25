@@ -22,8 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var windowLayoutCoordinator: WindowLayoutCoordinator!
   private let ejectStore = EjectStore()
   private let progressOverlay = ProgressOverlay()
-  private static let handsOffSubtitle =
-    "Hands off the mouse and keyboard — Mission Control is being driven automatically"
+  private let mouseBlocker = MouseInputBlocker()
   /// One eject/restore MC session at a time; also blocks auto-restore from
   /// firing mid-eject.
   private var spaceEvacuationInFlight = false
@@ -838,7 +837,19 @@ extension AppDelegate: KeyInterceptorDelegate {
     // Block Cmd+Tab and friends during the Mission Control ballet — a panel
     // opening mid-drag would fight the synthetic mouse events.
     keyInterceptor.setRestoring(true)
-    progressOverlay.show(message: "Ejecting Spaces…", subtitle: Self.handsOffSubtitle)
+
+    // Physical mouse input is consumed for the duration — a stray user move
+    // mid-drag yanks the tile off course. Deadline scales with the workload;
+    // the tap also self-expires (see MouseInputBlocker) and every completion
+    // path below unblocks.
+    let planned = EjectPlanner.plan(
+      spaces: viewModel.spaceManager.getAllSpaces(),
+      targetDisplayUUID: SpaceManager.builtinDisplayUUID() ?? "",
+      names: spaceNameStore.allCustomNames())
+    mouseBlocker.block(for: 20.0 + 6.0 * Double(planned.moves.count))
+    progressOverlay.show(
+      message: "Ejecting Spaces…",
+      subtitle: "Mouse interaction paused while ejecting…")
 
     DispatchQueue.global(qos: .userInteractive).async { [weak self] in
       guard let self else { return }
@@ -849,6 +860,7 @@ extension AppDelegate: KeyInterceptorDelegate {
       DispatchQueue.main.async {
         self.spaceEvacuationInFlight = false
         self.keyInterceptor.setRestoring(false)
+        self.mouseBlocker.unblock()
         switch result {
         case .success(let summary):
           if summary.ejected.isEmpty && summary.failed.isEmpty {
@@ -919,7 +931,15 @@ extension AppDelegate: KeyInterceptorDelegate {
     spaceEvacuationInFlight = true
     if showHUD {
       keyInterceptor.setRestoring(true)
-      progressOverlay.show(message: "Restoring Spaces…", subtitle: Self.handsOffSubtitle)
+      let plan = RestorePlanner.plan(
+        spaces: viewModel.spaceManager.getAllSpaces(),
+        pending: ejectStore.pendingEjections().filter {
+          !onlyArmed || armed.contains($0.key)
+        })
+      mouseBlocker.block(for: 20.0 + 6.0 * Double(plan.moves.count))
+      progressOverlay.show(
+        message: "Restoring Spaces…",
+        subtitle: "Mouse interaction paused while restoring…")
     }
 
     DispatchQueue.global(qos: .userInteractive).async { [weak self] in
@@ -931,6 +951,7 @@ extension AppDelegate: KeyInterceptorDelegate {
       DispatchQueue.main.async {
         self.spaceEvacuationInFlight = false
         self.keyInterceptor.setRestoring(false)
+        self.mouseBlocker.unblock()
         guard showHUD else { return }
         switch result {
         case .success(let summary) where !summary.restored.isEmpty:
