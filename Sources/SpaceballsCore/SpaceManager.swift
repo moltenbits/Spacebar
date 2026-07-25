@@ -380,6 +380,20 @@ public class SpaceManager {
   }
 
   /// Returns the display UUID currently containing the mouse cursor.
+  /// The CGS display UUID of the built-in display, or nil when none is
+  /// active (clamshell mode, desktop Macs).
+  public static func builtinDisplayUUID() -> String? {
+    var count: UInt32 = 0
+    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    CGGetActiveDisplayList(16, &ids, &count)
+    for i in 0..<Int(count) where CGDisplayIsBuiltin(ids[i]) != 0 {
+      guard let cfUUID = CGDisplayCreateUUIDFromDisplayID(ids[i])?.takeUnretainedValue()
+      else { continue }
+      return CFUUIDCreateString(nil, cfUUID) as String
+    }
+    return nil
+  }
+
   public static func cursorDisplayUUID() -> String? {
     let location = NSEvent.mouseLocation  // global, bottom-left origin
     guard

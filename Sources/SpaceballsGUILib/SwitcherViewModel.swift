@@ -1425,6 +1425,17 @@ public final class SwitcherViewModel: ObservableObject {
       let section = sections.first(where: { $0.id == spaceID })
     else { return }
 
+    // A display's Default Space is pinned: it exists so the display always
+    // keeps an anchor space, so moving it away would defeat its purpose.
+    // Renaming it is the deliberate way to unpin it.
+    if spaceNameStore.customName(forSpaceUUID: section.spaceUUID)
+      == SpaceNameStore.defaultSpaceName
+    {
+      sortOverlayText = "\(SpaceNameStore.defaultSpaceName) is pinned to its display"
+      sortOverlayGeneration += 1
+      return
+    }
+
     // Only desktop spaces can be moved; the display cycle needs somewhere to go.
     let allSpaces = spaceManager.getAllSpaces()
     guard allSpaces.first(where: { $0.id == spaceID })?.type == .desktop else { return }

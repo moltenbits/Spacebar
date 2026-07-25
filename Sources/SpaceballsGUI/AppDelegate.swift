@@ -73,6 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     setupMainMenu()
 
+    assignDefaultSpaceNames()
+
     keyInterceptor = KeyInterceptor()
     keyInterceptor.delegate = self
     keyInterceptor.keyBindings = appSettings.keyBindings
@@ -168,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
         Diagnostics.writeHeader(
           appVersion: self.appVersionString, spaceManager: self.viewModel.spaceManager)
+        self.assignDefaultSpaceNames()
       }
     }
 
@@ -434,6 +437,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let cfUUID = CGDisplayCreateUUIDFromDisplayID(screenNumber)?.takeUnretainedValue()
     guard let cfUUID else { return nil }
     return CFUUIDCreateString(nil, cfUUID) as String
+  }
+
+  /// Names each external display's sole unnamed desktop space "Default
+  /// Space" — a pinned anchor space, so any named space on that display can
+  /// always be moved away without first creating a sibling. Idempotent;
+  /// runs at launch and on every display reconfiguration.
+  private func assignDefaultSpaceNames() {
+    DefaultSpaceNamer.assignNames(
+      spaces: viewModel.spaceManager.getAllSpaces(),
+      builtinDisplayUUID: SpaceManager.builtinDisplayUUID(),
+      store: spaceNameStore)
   }
 
   /// The physical layout of the connected displays, in NSScreen (y-up)

@@ -87,6 +87,7 @@ way while building Spaceballs:
 - **Cross-space activation** — switches to any window on any Space with native animation
 - **Move windows between Spaces** — Cmd+M to mark a window, navigate to the target space, release to move (no SIP required)
 - **Move Spaces between displays** — Cmd+Shift+M to mark a Space, arrow to the target display, release to move
+- **Stable Default Spaces** — each external display's fresh space is auto-named "Default Space" and pinned to its display, so a display always keeps an anchor space and any named Space can be moved off it without first creating a sibling (rename a Default Space to unpin it; the built-in display is exempt)
 - **Window resizing** — Cmd+Shift+D opens a grid overlay for the focused window: drag cells to resize, or apply
   configurable presets (pressing a preset again cycles it across screens)
 - **Keyboard-driven** — Cmd+Tab to cycle, Cmd+\` to go back; all shortcuts customizable in Settings
@@ -175,7 +176,8 @@ spaceballs move 12345 67890             # Move by window ID and space ID
 
 An entire Space — with all its windows — can be relocated to another display, again via simulated Mission Control
 drag (no SIP required). If the Space is the display's only desktop or is currently active, Spaceballs handles the
-prerequisites automatically (creates a sibling Space / switches away first).
+prerequisites automatically (creates a sibling Space / switches away first). Spaces named "Default Space" are
+pinned to their display and refuse to move, in both the GUI and the CLI — rename one to unpin it.
 
 **How to use:**
 
