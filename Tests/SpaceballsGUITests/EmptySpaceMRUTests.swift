@@ -201,6 +201,46 @@ struct SpaceMoveMRUTests {
     #expect(vm.mruTopDisplayUUID == "display-2")
   }
 
+  @Test("Moving the focused display's current space keeps it above the replacement's inferred stamp")
+  func movedCurrentSpaceOutranksReplacementStamp() {
+    let ds = makeEmptySpaceScenario()
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    vm.showEmptySpaces = true
+    vm.overrideDisplayUUID = "display-1"
+    vm.refresh()
+
+    // Move space 1 — the focused display's own current space — to display-2.
+    vm.selectedItem = .spaceHeader(1)
+    vm.toggleSpaceMoveMode()
+    vm.moveMarkedSpaceToNextDisplay()
+    #expect(vm.executeMoveSpace())
+
+    // CGS reflects the move: display-1 slides replacement space 2 in beneath
+    // the user; display-2 now hosts space 1 as its current (activated) space.
+    ds.displaySpaces = [
+      display(
+        uuid: "display-1",
+        spaces: [space(id: 2, uuid: "uuid-2")],
+        current: 2),
+      display(
+        uuid: "display-2",
+        spaces: [
+          space(id: 3, uuid: "uuid-3"), space(id: 4, uuid: "uuid-4"),
+          space(id: 1, uuid: "uuid-1"),
+        ],
+        current: 1),
+    ]
+
+    // The replacement's arrival reads as a focus transition on display-1, but
+    // it is a side effect of the move — the explicitly activated space must
+    // stay MRU-top and lead the panel with its display; the replacement still
+    // earns the next rank as that display's most recent space.
+    vm.refresh()
+    #expect(vm.sections.first?.id == 1)
+    #expect(vm.sections[1].id == 2)
+    #expect(vm.mruTopDisplayUUID == "display-2")
+  }
+
   @Test("Executing a space move without activation does not promote it")
   func movedSpaceNotPromotedWhenNotActivating() {
     let ds = makeEmptySpaceScenario()

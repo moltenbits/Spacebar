@@ -224,6 +224,13 @@ public final class SwitcherViewModel: ObservableObject {
   private var lastFocusedSpaceID: UInt64?
   private var lastFrontWindowID: Int?
 
+  /// Set when executeMoveSpace stamps an explicitly activated move. Moving the
+  /// focused display's current space away makes CGS slide a replacement space
+  /// in beneath the user, which the next refresh would misread as the user
+  /// switching to it. The explicit activation is authoritative: the first
+  /// transition stamp from the origin display ranks behind it instead of on top.
+  private var pendingMoveStamp: (spaceID: UInt64, originDisplayUUID: String?)?
+
   /// Persistent MRU history of space IDs, most recent first.
   /// Updated on each refresh() when the current space changes.
   private var spaceMRUHistory: [UInt64] = []
@@ -308,7 +315,19 @@ public final class SwitcherViewModel: ObservableObject {
     if let currentID = focusedCurrentSpace {
       if currentID != lastFocusedSpaceID || frontWindowID != lastFrontWindowID {
         spaceMRUHistory.removeAll { $0 == currentID }
-        spaceMRUHistory.insert(currentID, at: 0)
+        var insertionIndex = 0
+        if let pending = pendingMoveStamp {
+          // The origin display's replacement space still earns that display's
+          // most-recent rank — just beneath the explicitly activated space.
+          let currentDisplayUUID = spaces.first(where: { $0.id == currentID })?.displayUUID
+          if currentID != pending.spaceID, currentDisplayUUID == pending.originDisplayUUID,
+            let stampedIndex = spaceMRUHistory.firstIndex(of: pending.spaceID)
+          {
+            insertionIndex = stampedIndex + 1
+          }
+          pendingMoveStamp = nil
+        }
+        spaceMRUHistory.insert(currentID, at: insertionIndex)
       }
       lastFocusedSpaceID = currentID
       lastFrontWindowID = frontWindowID
@@ -1396,6 +1415,7 @@ public final class SwitcherViewModel: ObservableObject {
       // here so the next panel open shows the moved space as most recent.
       spaceMRUHistory.removeAll { $0 == spaceID }
       spaceMRUHistory.insert(spaceID, at: 0)
+      pendingMoveStamp = (spaceID, originDisplayUUID)
     }
     let warpAfterMove = activateAfterMove && warpCursorOnActivation
     DispatchQueue.global(qos: .userInteractive).async { [spaceManager] in
