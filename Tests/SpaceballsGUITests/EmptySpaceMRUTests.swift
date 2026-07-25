@@ -139,3 +139,47 @@ struct EmptySpaceMRUTests {
     #expect(vm.sections[1].id == 4)
   }
 }
+
+@Suite("Space Move MRU Promotion")
+struct SpaceMoveMRUTests {
+
+  /// Marks space 3 (display-2's current space) and visually retargets it to
+  /// display-1, mirroring the Cmd+Shift+M flow.
+  private func markAndRetarget(_ vm: SwitcherViewModel) {
+    vm.selectedItem = .spaceHeader(3)
+    vm.toggleSpaceMoveMode()
+    vm.moveMarkedSpaceToNextDisplay()
+  }
+
+  @Test("Executing a space move with activation promotes the moved space")
+  func movedSpacePromotedWhenActivating() {
+    let ds = makeEmptySpaceScenario()
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    vm.showEmptySpaces = true
+    vm.refresh()
+
+    markAndRetarget(vm)
+    #expect(vm.executeMoveSpace())
+
+    // The switcher's own activation-after-move switches to the moved space
+    // deep inside SpaceManager — focus inference can't see it, so the view
+    // model must have stamped it directly.
+    vm.refresh()
+    #expect(vm.sections.first?.id == 3)
+  }
+
+  @Test("Executing a space move without activation does not promote it")
+  func movedSpaceNotPromotedWhenNotActivating() {
+    let ds = makeEmptySpaceScenario()
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    vm.showEmptySpaces = true
+    vm.activateMovedItem = false
+    vm.refresh()
+
+    markAndRetarget(vm)
+    #expect(vm.executeMoveSpace())
+
+    vm.refresh()
+    #expect(vm.sections.first?.id != 3)
+  }
+}

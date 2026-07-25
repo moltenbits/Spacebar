@@ -1378,6 +1378,14 @@ public final class SwitcherViewModel: ObservableObject {
     guard targetDisplayUUID != originDisplayUUID else { return false }
 
     let activateAfterMove = activateMovedItem
+    if activateAfterMove {
+      // The post-move activation happens deep inside SpaceManager (a Mission
+      // Control tile press), which focus inference in refresh() may never
+      // see — an activated space needn't take keyboard focus. Stamp the MRU
+      // here so the next panel open shows the moved space as most recent.
+      spaceMRUHistory.removeAll { $0 == spaceID }
+      spaceMRUHistory.insert(spaceID, at: 0)
+    }
     DispatchQueue.global(qos: .userInteractive).async { [spaceManager] in
       do {
         try spaceManager.moveSpaceToDisplay(
