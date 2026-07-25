@@ -129,8 +129,9 @@ Once running, the app lives in the background (no Dock icon). Keyboard shortcuts
 |---|---|
 | Cmd+Tab | Show panel / move selection down |
 | Cmd+\` | Move selection up |
-| Cmd+↓/↑/→/← (or bare arrows) | Jump to next / previous space (move-mode-aware) |
-| Cmd+Shift+↓/↑/→/← | Move to the display in that physical direction (arrangement-aware, move-mode-aware) |
+| Cmd+↓ / Cmd+↑ (or bare arrows) | Next / previous space, continuing onto the display below / above (arrangement-aware, move-mode-aware) |
+| Cmd+→ / Cmd+← (Shift optional) | Move to the display in that physical direction (arrangement-aware, move-mode-aware) |
+| Cmd+Shift+↓ / Cmd+Shift+↑ | Jump straight to the display below / above |
 | Release Cmd (or Cmd+Enter) | Activate selected window or space |
 | Escape | Dismiss panel / cancel current mode |
 | Cmd+M | Enter move mode (mark selected window for moving between Spaces) |

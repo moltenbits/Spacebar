@@ -114,17 +114,17 @@ public struct KeyBindings: Codable, Equatable {
     }
   }
 
-  /// Resolves a navigation key press. All four navigation keys (defaults:
-  /// ↓ ↑ → ←) move by space when plain and by display when Shift is held —
-  /// Shift is the granularity modifier, not a separate set of bindings.
-  /// Each binding slot carries the physical direction its default arrow
-  /// points in, so Shift+key targets the display in that direction.
+  /// Resolves a navigation key press. The vertical keys (defaults ↓ ↑) step
+  /// space by space — Shift jumps straight to the display below/above. The
+  /// horizontal keys (defaults → ←) always target the display in their
+  /// direction; Shift makes no difference there. Each binding slot carries
+  /// the physical direction its default arrow points in.
   public func navigationCommand(keyCode: UInt16, shiftHeld: Bool) -> NavigationCommand? {
     switch keyCode {
     case nextSpace: return shiftHeld ? .display(.down) : .nextSpace
-    case nextDisplay: return shiftHeld ? .display(.right) : .nextSpace
     case previousSpace: return shiftHeld ? .display(.up) : .previousSpace
-    case previousDisplay: return shiftHeld ? .display(.left) : .previousSpace
+    case nextDisplay: return .display(.right)
+    case previousDisplay: return .display(.left)
     default: return nil
     }
   }
@@ -180,8 +180,8 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     case .previousItem: "Previous item"
     case .nextSpace: "Next space"
     case .previousSpace: "Previous space"
-    case .nextDisplay: "Next space (alternate)"
-    case .previousDisplay: "Previous space (alternate)"
+    case .nextDisplay: "Display to the right"
+    case .previousDisplay: "Display to the left"
     case .renameSpace: "Rename space"
     case .cycleSortOrder: "Cycle sort order"
     case .createSpace: "Create space menu"
@@ -197,10 +197,10 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     switch self {
     case .activateAndNext: "Opens the panel and navigates to the next item"
     case .previousItem: "Navigates to the previous item"
-    case .nextSpace: "Jumps to the next space (Shift: display below)"
-    case .previousSpace: "Jumps to the previous space (Shift: display above)"
-    case .nextDisplay: "Alternate key for the next space (Shift: display to the right)"
-    case .previousDisplay: "Alternate key for the previous space (Shift: display to the left)"
+    case .nextSpace: "Next space, continuing onto the display below (Shift: display below)"
+    case .previousSpace: "Previous space, continuing onto the display above (Shift: display above)"
+    case .nextDisplay: "Moves to the display on the right (Shift optional)"
+    case .previousDisplay: "Moves to the display on the left (Shift optional)"
     case .renameSpace: "Starts renaming the selected space"
     case .cycleSortOrder: "Cycles through space sort orders"
     case .createSpace: "Opens the create space menu"

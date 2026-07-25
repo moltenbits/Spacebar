@@ -9,12 +9,18 @@ struct NavigationKeyTests {
 
   // Default key codes: ↓ 125, ↑ 126, → 124, ← 123.
 
-  @Test("Plain arrows all navigate by space")
-  func plainArrowsNavigateBySpace() {
+  @Test("Plain vertical arrows navigate by space")
+  func plainVerticalArrowsNavigateBySpace() {
     #expect(bindings.navigationCommand(keyCode: 125, shiftHeld: false) == .nextSpace)
-    #expect(bindings.navigationCommand(keyCode: 124, shiftHeld: false) == .nextSpace)
     #expect(bindings.navigationCommand(keyCode: 126, shiftHeld: false) == .previousSpace)
-    #expect(bindings.navigationCommand(keyCode: 123, shiftHeld: false) == .previousSpace)
+  }
+
+  @Test("Horizontal arrows navigate by display, Shift or not")
+  func horizontalArrowsNavigateByDisplay() {
+    #expect(bindings.navigationCommand(keyCode: 124, shiftHeld: false) == .display(.right))
+    #expect(bindings.navigationCommand(keyCode: 124, shiftHeld: true) == .display(.right))
+    #expect(bindings.navigationCommand(keyCode: 123, shiftHeld: false) == .display(.left))
+    #expect(bindings.navigationCommand(keyCode: 123, shiftHeld: true) == .display(.left))
   }
 
   @Test("Shifted arrows navigate by display in the arrow's direction")

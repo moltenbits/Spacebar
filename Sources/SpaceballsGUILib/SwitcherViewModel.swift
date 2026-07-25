@@ -752,6 +752,30 @@ public final class SwitcherViewModel: ObservableObject {
     }
   }
 
+  /// First selectable item of the display reached by walking the physical
+  /// arrangement in `direction`. Entering downward lands on that display's
+  /// first space, entering upward on its last — the spatially nearest end.
+  /// Walks past displays with no visible sections; nil when nothing lies
+  /// in that direction.
+  private func verticalNeighborEntry(
+    from displayUUID: String, direction: ArrangementDirection
+  ) -> SelectedItem? {
+    guard let arrangement = displayArrangement else { return nil }
+    var visited: Set<String> = [displayUUID]
+    var current = displayUUID
+    while let next = arrangement.neighborUUID(of: current, direction: direction),
+      !visited.contains(next)
+    {
+      visited.insert(next)
+      let displaySections = filteredSections.filter { $0.displayUUID == next }
+      if let target = direction == .down ? displaySections.first : displaySections.last {
+        return target.windows.first.map { .windowRow($0.id) } ?? .spaceHeader(target.id)
+      }
+      current = next
+    }
+    return nil
+  }
+
   public func moveToNextSpace() {
     let items = flatSelectableItems
     guard !items.isEmpty else { return }
@@ -786,6 +810,23 @@ public final class SwitcherViewModel: ObservableObject {
     }
 
     let currentSpace = spaceID(for: current, using: map)
+
+    // Mode 3 with a known arrangement: at a display's last space, ↓ continues
+    // onto the display physically BELOW, entering at its first space — the
+    // crossing follows the arrangement, not displayOrder (which is MRU-led).
+    // No display below is a no-op.
+    if !displayOrder.isEmpty, displayArrangement != nil, let currentSpace,
+      let currentSection = filteredSections.first(where: { $0.id == currentSpace }),
+      filteredSections.last(where: { $0.displayUUID == currentSection.displayUUID })?.id
+        == currentSpace
+    {
+      if let entry = verticalNeighborEntry(
+        from: currentSection.displayUUID, direction: .down)
+      {
+        selectedItem = entry
+      }
+      return
+    }
 
     // In Mode 3, find the display group boundary so we stop at .spaces
     let groupEnd: Int?
@@ -868,6 +909,22 @@ public final class SwitcherViewModel: ObservableObject {
     }
 
     let currentSpace = spaceID(for: current, using: map)
+
+    // Mode 3 with a known arrangement: at a display's first space, ↑ continues
+    // onto the display physically ABOVE, entering at its last space.
+    // No display above is a no-op.
+    if !displayOrder.isEmpty, displayArrangement != nil, let currentSpace,
+      let currentSection = filteredSections.first(where: { $0.id == currentSpace }),
+      filteredSections.first(where: { $0.displayUUID == currentSection.displayUUID })?.id
+        == currentSpace
+    {
+      if let entry = verticalNeighborEntry(
+        from: currentSection.displayUUID, direction: .up)
+      {
+        selectedItem = entry
+      }
+      return
+    }
 
     // In Mode 3, find the display group boundary
     let groupStart: Int?

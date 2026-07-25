@@ -763,7 +763,9 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveMarkedWindowToNextSpace()
       resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
-      viewModel.moveMarkedSpaceToNextDisplay()
+      // A marked space only moves display-to-display, so ↓ is directional
+      // like the rest; Cmd+Tab keeps the linear cycle for reachability.
+      viewModel.moveMarkedSpace(inDirection: .down)
       resizePanelsToFit()
     } else {
       viewModel.moveToNextSpace()
@@ -777,7 +779,7 @@ extension AppDelegate: KeyInterceptorDelegate {
       viewModel.moveMarkedWindowToPreviousSpace()
       resizePanelsToFit()
     } else if viewModel.spaceMoveMode {
-      viewModel.moveMarkedSpaceToPreviousDisplay()
+      viewModel.moveMarkedSpace(inDirection: .up)
       resizePanelsToFit()
     } else {
       viewModel.moveToPreviousSpace()
