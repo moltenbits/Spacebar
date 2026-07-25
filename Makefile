@@ -115,11 +115,15 @@ install: bundle-release
 	fi
 	@echo "Installed! Run 'hash -r' to refresh your shell, then 'spaceballs --help' to get started."
 
-uninstall: ## Uninstall app bundles and CLI symlink (may require sudo)
+# Removes only the Dev bundles that `make install` creates — never the
+# release "Spaceballs.app", which is Homebrew-managed. (Deleting it behind
+# brew's back strands the cask: the next `brew upgrade` aborts with
+# "App source ... is not there".)
+uninstall: ## Uninstall dev app bundles and CLI symlink (may require sudo)
 	@rm -f "$(BIN_INSTALL_PATH)/spaceballs" 2>/dev/null || \
 		sudo rm -f "$(BIN_INSTALL_PATH)/spaceballs"
-	@rm -rf "$(LIB_INSTALL_PATH)/Spaceballs-CLI.app" 2>/dev/null || \
-		sudo rm -rf "$(LIB_INSTALL_PATH)/Spaceballs-CLI.app"
-	@rm -rf "$(APP_INSTALL_PATH)/Spaceballs.app" 2>/dev/null || \
-		sudo rm -rf "$(APP_INSTALL_PATH)/Spaceballs.app"
-	@echo "Uninstalled Spaceballs"
+	@rm -rf "$(LIB_INSTALL_PATH)/Spaceballs-CLI Dev.app" 2>/dev/null || \
+		sudo rm -rf "$(LIB_INSTALL_PATH)/Spaceballs-CLI Dev.app"
+	@rm -rf "$(APP_INSTALL_PATH)/Spaceballs Dev.app" 2>/dev/null || \
+		sudo rm -rf "$(APP_INSTALL_PATH)/Spaceballs Dev.app"
+	@echo "Uninstalled Spaceballs Dev"
