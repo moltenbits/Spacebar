@@ -77,6 +77,31 @@ private func makeViewModel(arranged: Bool) -> SwitcherViewModel {
   return vm
 }
 
+/// Mode 3 on a lone display (MacBook only): two spaces, one window each,
+/// the display hosting the meta rows.
+private func makeSingleDisplayViewModel() -> SwitcherViewModel {
+  let ds = MutableMockDataSource()
+  ds.displaySpaces = [
+    display(
+      uuid: "display-solo",
+      spaces: [space(id: 1, uuid: "uuid-1"), space(id: 2, uuid: "uuid-2")],
+      current: 1)
+  ]
+  ds.windowList = [
+    window(id: 10, owner: "Safari", name: "Google", pid: 100),
+    window(id: 20, owner: "Terminal", name: "bash", pid: 200),
+  ]
+  ds.windowSpaces = [10: [1], 20: [2]]
+  let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+  vm.displayArrangement = DisplayArrangement(displays: [
+    .init(uuid: "display-solo", frame: CGRect(x: 0, y: 0, width: 1800, height: 1169))
+  ])
+  vm.metaRowsDisplayUUID = "display-solo"
+  vm.refresh()
+  vm.displayOrder = ["display-solo"]
+  return vm
+}
+
 private func sections(_ vm: SwitcherViewModel, on uuid: String) -> [SwitcherSection] {
   vm.filteredSections.filter { $0.displayUUID == uuid }
 }
@@ -267,6 +292,51 @@ struct VerticalSpaceNavigationTests {
     vm.selectedItem = firstItem(of: lower[lower.count - 1])
     vm.moveSelectionDown()
     #expect(vm.selectedItem == .spaces)
+  }
+
+  @Test("Single display: Up from the first space wraps through Settings and Spaces")
+  func singleDisplayUpWrapsThroughMetaRows() {
+    let vm = makeSingleDisplayViewModel()
+    let solo = sections(vm, on: "display-solo")
+
+    vm.selectedItem = firstItem(of: solo[0])
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .settings)
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .spaces)
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == firstItem(of: solo[solo.count - 1]))
+  }
+
+  @Test("Single display: Down from the last space wraps through Spaces and Settings")
+  func singleDisplayDownWrapsThroughMetaRows() {
+    let vm = makeSingleDisplayViewModel()
+    let solo = sections(vm, on: "display-solo")
+
+    vm.selectedItem = firstItem(of: solo[solo.count - 1])
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == .spaces)
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == .settings)
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == firstItem(of: solo[0]))
+  }
+
+  @Test("Up at a non-meta display's first space with nothing above stays put")
+  func upWithoutAxisOnNonMetaDisplayIsNoOp() {
+    // Side-by-side layout: the non-meta display has no vertical axis and
+    // does not host the meta rows — ↑ at its first space stays a no-op.
+    let vm = makeViewModel(arranged: false)
+    vm.displayArrangement = DisplayArrangement(displays: [
+      .init(uuid: "display-upper", frame: CGRect(x: 0, y: 0, width: 1920, height: 1080)),
+      .init(uuid: "display-lower", frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080)),
+    ])
+    vm.metaRowsDisplayUUID = "display-lower"
+    let upper = sections(vm, on: "display-upper")
+    let start = firstItem(of: upper[0])
+    vm.selectedItem = start
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == start)
   }
 
   @Test("Without an arrangement, group-boundary stops behave as before")
