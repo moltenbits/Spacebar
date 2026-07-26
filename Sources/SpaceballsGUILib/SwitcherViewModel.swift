@@ -189,6 +189,12 @@ public final class SwitcherViewModel: ObservableObject {
   /// AppKit context) directional moves fall back to cycling in CGS order.
   public var displayArrangement: DisplayArrangement?
 
+  /// In mode 3 ("All" panels), the display whose panel hosts the Spaces and
+  /// Settings rows — every other panel hides them, and the ↑/↓ space cycle
+  /// visits them at this display's bottom boundary. nil (single-panel modes)
+  /// shows them on every panel with no traversal detour.
+  public var metaRowsDisplayUUID: String?
+
   /// When true, spaces with no windows are included in the switcher.
   public var showEmptySpaces: Bool = true
 
@@ -753,13 +759,14 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   /// First selectable item of the display reached by walking the physical
-  /// arrangement in `direction`. Entering downward lands on that display's
-  /// first space, entering upward on its last — the spatially nearest end.
-  /// Walks past displays with no visible sections and wraps past the far
-  /// edge; nil when no display lies on that axis at all.
-  private func verticalNeighborEntry(
+  /// arrangement in `direction`, plus which display it landed on. Entering
+  /// downward lands on that display's first space, entering upward on its
+  /// last — the spatially nearest end. Walks past displays with no visible
+  /// sections and wraps past the far edge; nil when no display lies on that
+  /// axis at all.
+  private func verticalNeighborLanding(
     from displayUUID: String, direction: ArrangementDirection
-  ) -> SelectedItem? {
+  ) -> (item: SelectedItem, displayUUID: String)? {
     guard let arrangement = displayArrangement else { return nil }
     var visited: Set<String> = [displayUUID]
     var current = displayUUID
@@ -769,11 +776,26 @@ public final class SwitcherViewModel: ObservableObject {
       visited.insert(next)
       let displaySections = filteredSections.filter { $0.displayUUID == next }
       if let target = direction == .down ? displaySections.first : displaySections.last {
-        return target.windows.first.map { .windowRow($0.id) } ?? .spaceHeader(target.id)
+        let item =
+          target.windows.first.map { SelectedItem.windowRow($0.id) }
+          ?? .spaceHeader(target.id)
+        return (item, next)
       }
       current = next
     }
     return nil
+  }
+
+  /// Records the display group containing `position` so .spaces/.settings
+  /// selection knows which group the user came from (highlight context and
+  /// the ↑-from-Spaces return path).
+  private func rememberSettingsGroup(containing position: Int) {
+    let ranges = displayGroupRanges()
+    if let groupIdx = ranges.firstIndex(where: {
+      position >= $0.start && position <= $0.end
+    }) {
+      settingsDisplayIndex = groupIdx
+    }
   }
 
   public func moveToNextSpace() {
@@ -793,6 +815,14 @@ public final class SwitcherViewModel: ObservableObject {
     }
     if case .settings = current {
       if !displayOrder.isEmpty {
+        // Meta display set: ↓ off Settings continues the vertical crossing
+        // from the meta display's bottom (wrapping past the far edge).
+        if let metaDisplay = metaRowsDisplayUUID,
+          let landing = verticalNeighborLanding(from: metaDisplay, direction: .down)
+        {
+          selectedItem = landing.item
+          return
+        }
         // Mode 3: go to next display group's first space
         let ranges = displayGroupRanges()
         let nextGroup = (settingsDisplayIndex + 1) % ranges.count
@@ -821,10 +851,17 @@ public final class SwitcherViewModel: ObservableObject {
       filteredSections.last(where: { $0.displayUUID == currentSection.displayUUID })?.id
         == currentSpace
     {
-      if let entry = verticalNeighborEntry(
+      // The meta display's panel ends with the Spaces and Settings rows —
+      // ↓ visits them before crossing off the display.
+      if currentSection.displayUUID == metaRowsDisplayUUID {
+        rememberSettingsGroup(containing: currentPos)
+        selectedItem = .spaces
+        return
+      }
+      if let landing = verticalNeighborLanding(
         from: currentSection.displayUUID, direction: .down)
       {
-        selectedItem = entry
+        selectedItem = landing.item
       }
       return
     }
@@ -919,10 +956,19 @@ public final class SwitcherViewModel: ObservableObject {
       filteredSections.first(where: { $0.displayUUID == currentSection.displayUUID })?.id
         == currentSpace
     {
-      if let entry = verticalNeighborEntry(
+      if let landing = verticalNeighborLanding(
         from: currentSection.displayUUID, direction: .up)
       {
-        selectedItem = entry
+        // Entering the meta display from below lands on its bottom-most
+        // rows first: Settings, then Spaces, then its last space.
+        if landing.displayUUID == metaRowsDisplayUUID {
+          if let pos = items.firstIndex(of: landing.item) {
+            rememberSettingsGroup(containing: pos)
+          }
+          selectedItem = .settings
+        } else {
+          selectedItem = landing.item
+        }
       }
       return
     }

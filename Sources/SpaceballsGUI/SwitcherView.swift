@@ -33,6 +33,16 @@ struct SwitcherView: View {
     }
   }
 
+  /// Whether THIS panel shows the Spaces/Settings rows. When the view model
+  /// restricts them to one display's panel (mode 3), only that panel renders
+  /// them; single-panel modes always do.
+  private var showsMetaRows: Bool {
+    guard let restricted = viewModel.metaRowsDisplayUUID, let uuid = displayUUID else {
+      return true
+    }
+    return uuid == restricted
+  }
+
   /// All selectable items visible in THIS panel (not the global flat list).
   private var localSelectableItems: [SelectedItem] {
     var items: [SelectedItem] = []
@@ -45,8 +55,10 @@ struct SwitcherView: View {
         }
       }
     }
-    items.append(.spaces)
-    items.append(.settings)
+    if showsMetaRows {
+      items.append(.spaces)
+      items.append(.settings)
+    }
     return items
   }
 
@@ -149,8 +161,10 @@ struct SwitcherView: View {
             ForEach(visibleSections) { section in
               sectionContent(section)
             }
-            spacesRow
-            settingsRow
+            if showsMetaRows {
+              spacesRow
+              settingsRow
+            }
           }
           .padding(.top, contentOverflows ? 20 : 6)
           .padding(.bottom, contentOverflows ? 20 : 10)
@@ -307,6 +321,8 @@ struct SwitcherView: View {
   /// Whether this panel should show the highlight for .spaces/.settings
   private var isGlobalRowSelectedOnThisPanel: Bool {
     guard let uuid = displayUUID else { return true }  // single panel, always show
+    // Restricted meta rows render on exactly one panel — highlight there.
+    if let restricted = viewModel.metaRowsDisplayUUID { return uuid == restricted }
     return viewModel.contextDisplayUUID == uuid
   }
 
