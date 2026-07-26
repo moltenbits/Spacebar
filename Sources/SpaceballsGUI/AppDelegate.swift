@@ -700,6 +700,13 @@ extension AppDelegate: KeyInterceptorDelegate {
     showPanel()
   }
 
+  func keyInterceptorAdvanceAfterOpen() {
+    // The Cmd+Tab that opened the panel: advance to the second row unless
+    // the active window sits alone on its display's only space.
+    guard !viewModel.shouldKeepInitialSelectionOnOpen else { return }
+    keyInterceptorMoveDown()
+  }
+
   func keyInterceptorMoveDown() {
     if viewModel.panelMode == .createSpace {
       viewModel.moveCreateSelectionDown()

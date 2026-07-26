@@ -3,6 +3,7 @@ import SpaceballsGUILib
 
 protocol KeyInterceptorDelegate: AnyObject {
   func keyInterceptorShowPanel()
+  func keyInterceptorAdvanceAfterOpen()
   func keyInterceptorMoveDown()
   func keyInterceptorMoveUp()
   func keyInterceptorConfirm()
@@ -318,8 +319,10 @@ private func keyInterceptorCallback(
       DispatchQueue.main.async {
         if !interceptor.panelVisible {
           interceptor.delegate?.keyInterceptorShowPanel()
+          interceptor.delegate?.keyInterceptorAdvanceAfterOpen()
+        } else {
+          interceptor.delegate?.keyInterceptorMoveDown()
         }
-        interceptor.delegate?.keyInterceptorMoveDown()
       }
       return nil  // consume
     }

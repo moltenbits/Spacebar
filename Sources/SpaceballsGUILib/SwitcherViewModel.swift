@@ -750,6 +750,24 @@ public final class SwitcherViewModel: ObservableObject {
     selectedItem = items.first
   }
 
+  /// True when the Cmd+Tab that just opened the panel should keep the
+  /// selection on the first row instead of advancing. Normally the advance
+  /// lands on the second row — the user rarely wants the window they're
+  /// already on. But when the active window is the ONLY window on its
+  /// display's ONLY visible space, the second row lives on a different
+  /// space entirely, and the highlight opening far from the space the user
+  /// is looking at reads as wrong — hold it on the active window instead.
+  public var shouldKeepInitialSelectionOnOpen: Bool {
+    guard case .windowRow(let id)? = selectedItem,
+      let section = filteredSections.first(where: {
+        $0.windows.contains(where: { $0.id == id })
+      }),
+      section.isCurrent,
+      section.windows.count == 1
+    else { return false }
+    return filteredSections.filter { $0.displayUUID == section.displayUUID }.count == 1
+  }
+
   /// Builds a window-ID → space-ID lookup from the current sections.
   private func windowSpaceMap() -> [Int: UInt64] {
     var map: [Int: UInt64] = [:]
