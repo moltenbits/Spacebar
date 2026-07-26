@@ -608,11 +608,11 @@ public final class SwitcherViewModel: ObservableObject {
   // MARK: - Selection
 
   /// Display group boundary indices within `flatSelectableItems` (excluding the trailing `.settings`).
-  /// Returns (startIndex, endIndex) pairs, one per display in `displayOrder`.
-  private func displayGroupRanges() -> [(start: Int, end: Int)] {
+  /// Returns (startIndex, endIndex, displayUUID) triples, one per display in `displayOrder`.
+  private func displayGroupRanges() -> [(start: Int, end: Int, uuid: String)] {
     guard !displayOrder.isEmpty else { return [] }
     let sections = filteredSections
-    var ranges: [(start: Int, end: Int)] = []
+    var ranges: [(start: Int, end: Int, uuid: String)] = []
     var idx = 0
     for uuid in displayOrder {
       let start = idx
@@ -620,7 +620,7 @@ public final class SwitcherViewModel: ObservableObject {
         idx += section.windows.isEmpty ? 1 : section.windows.count
       }
       if idx > start {
-        ranges.append((start: start, end: idx - 1))
+        ranges.append((start: start, end: idx - 1, uuid: uuid))
       }
     }
     return ranges
@@ -652,10 +652,16 @@ public final class SwitcherViewModel: ObservableObject {
         return
       }
 
-      // At end of a display group → go to .spaces
+      // At end of a display group → visit the meta rows when this group's
+      // panel hosts them, otherwise flow straight into the next group.
       if let groupIdx = ranges.firstIndex(where: { $0.end == idx }) {
-        settingsDisplayIndex = groupIdx
-        selectedItem = .spaces
+        if metaRowsDisplayUUID == nil || ranges[groupIdx].uuid == metaRowsDisplayUUID {
+          settingsDisplayIndex = groupIdx
+          selectedItem = .spaces
+        } else {
+          let nextGroup = (groupIdx + 1) % ranges.count
+          selectedItem = items[ranges[nextGroup].start]
+        }
         return
       }
 
@@ -701,10 +707,17 @@ public final class SwitcherViewModel: ObservableObject {
         return
       }
 
-      // At start of a display group → go to .settings (source = previous group, wrapping)
+      // At start of a display group → back into the previous group
+      // (wrapping): through .settings when that group's panel hosts the
+      // meta rows, else straight onto its last item.
       if let groupIdx = ranges.firstIndex(where: { $0.start == idx }) {
-        settingsDisplayIndex = (groupIdx - 1 + ranges.count) % ranges.count
-        selectedItem = .settings
+        let prevGroup = (groupIdx - 1 + ranges.count) % ranges.count
+        if metaRowsDisplayUUID == nil || ranges[prevGroup].uuid == metaRowsDisplayUUID {
+          settingsDisplayIndex = prevGroup
+          selectedItem = .settings
+        } else {
+          selectedItem = items[ranges[prevGroup].end]
+        }
         return
       }
 
