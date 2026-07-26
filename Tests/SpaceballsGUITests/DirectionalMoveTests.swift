@@ -89,8 +89,8 @@ struct DirectionalSpaceMoveTests {
     #expect(displayHosting(vm, spaceID: 1) == "display-left")
   }
 
-  @Test("A direction with no physical neighbor is a no-op")
-  func noNeighborIsNoOp() {
+  @Test("An axis with no displays on it is a no-op")
+  func emptyAxisIsNoOp() {
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
@@ -98,8 +98,17 @@ struct DirectionalSpaceMoveTests {
     markSpace(vm, id: 1)
     vm.moveMarkedSpace(inDirection: .up)
     #expect(displayHosting(vm, spaceID: 1) == "display-left")
+  }
+
+  @Test("Past the far edge, the move wraps to the opposite end")
+  func moveWrapsAtTheEdge() {
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    vm.displayArrangement = sideBySideArrangement()
+    vm.refresh()
+
+    markSpace(vm, id: 1)
     vm.moveMarkedSpace(inDirection: .left)
-    #expect(displayHosting(vm, spaceID: 1) == "display-left")
+    #expect(displayHosting(vm, spaceID: 1) == "display-right")
   }
 
   @Test("Without an arrangement, directions fall back to cycling")
@@ -133,8 +142,8 @@ struct DirectionalWindowMoveTests {
     #expect(displayHosting(vm, windowID: 10) == "display-left")
   }
 
-  @Test("A direction with no physical neighbor is a no-op")
-  func noNeighborIsNoOp() {
+  @Test("An axis with no displays on it is a no-op")
+  func emptyAxisIsNoOp() {
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
@@ -143,6 +152,18 @@ struct DirectionalWindowMoveTests {
     vm.toggleMoveMode()
     vm.moveMarkedWindow(inDirection: .down)
     #expect(displayHosting(vm, windowID: 10) == "display-left")
+  }
+
+  @Test("Past the far edge, the move wraps to the opposite end")
+  func moveWrapsAtTheEdge() {
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    vm.displayArrangement = sideBySideArrangement()
+    vm.refresh()
+
+    vm.selectedItem = .windowRow(10)
+    vm.toggleMoveMode()
+    vm.moveMarkedWindow(inDirection: .left)
+    #expect(displayHosting(vm, windowID: 10) == "display-right")
   }
 
   @Test("Without an arrangement, directions fall back to cycling")

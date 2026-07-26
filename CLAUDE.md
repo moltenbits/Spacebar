@@ -151,6 +151,7 @@ Native CGS/SkyLight move APIs (`SLSMoveWindowsToManagedSpace`, `CGSAddWindowsToS
 
 **Key details:**
 - Window thumbnails in MC are `AXButton` children of `mc.windows` with `AXTitle` = window title, `AXPosition`/`AXSize` = screen coordinates
+- Thumbnail matching (`matchWindowThumbnail`, pure/unit-tested) searches the window's own display first and prefers an exact title match on ANY display over any substring match; a substring match is accepted only when unambiguous (unique on the source display, else unique globally). MC shows every display's current space, so a similarly-titled window on another display (e.g. a terminal at the project path vs. an IDE with the project name in its title) would otherwise get grabbed and dragged instead of the real one.
 - Space buttons shift when a window is dragged into the bar (placeholder insertion). Positions must be read AFTER initiating the drag, not before.
 - Space buttons are matched by title ("Desktop N"), not index, because placeholder insertion shifts indices.
 - The `move` CLI subcommand accepts window titles or IDs, and space names or IDs.
@@ -174,7 +175,7 @@ Native CGS/SkyLight move APIs (`SLSMoveWindowsToManagedSpace`, `CGSAddWindowsToS
 - **Eject/restore batches drags in one MC session.** `moveSpacesInMCBatch` opens Mission Control once, performs many tile drags (`performSpaceTileDrag`), and dismisses once. Per-source-display drags MUST be ordered by DESCENDING tile index (removals never shift pending indices; the drop aims at the target bar's center, so gaining tiles is safe). `ejectSpaces` sweeps all non-Default spaces to the built-in display (creating+naming a Default Space where a display would be left empty, pre-switching displays whose current space is leaving), records origins in `EjectStore` (shared UserDefaults suite), and activates nothing. `restoreEjectedSpaces` reverses it when displays return; the GUI auto-restores on display reconfiguration (debounced 2s, single-flight with eject) but ONLY for **armed** records — those whose display was observed absent after the eject (armed at launch + each reconfiguration) — so spurious display events can't undo an eject whose displays never left. Manual restore (GUI Cmd+Shift+E, CLI `restore`) moves everything movable regardless of arming. Eject GUI: Cmd+E; CLI: `eject`. Planning is pure (`EjectPlanner`/`RestorePlanner`). ⚠️ `switchToSpace(spaceIndex:screenNumber:)` opens MC itself via the awake TOGGLE and returns before its async tile press — MC-sequenced flows must serialize switches and verify MC fully dismissed (`awaitMissionControlDismissed`) before the next awake.
 - **Default Spaces are pinned.** `DefaultSpaceNamer` auto-names each external display's sole unnamed desktop space "Default Space" (`SpaceNameStore.defaultSpaceName`) at GUI launch and on display reconfiguration; the built-in display is exempt. A space carrying exactly that name refuses space-move in both GUI (`toggleSpaceMoveMode`) and CLI (`move-space`) — renaming it unpins it. Purpose: a display always retains an anchor space, so named spaces can be moved off without sibling creation.
 - The `move-space <space> <display>` CLI subcommand accepts space IDs/names/"Desktop N" and display name substrings/UUIDs/1-based ordinals (`DisplayArgumentResolver`); DEBUG builds add `mc-move-space-test <sourceDisplay> <index> <targetDisplay>` for raw drag tuning
-- GUI: **Cmd+Shift+M** enters space-move mode (Cmd+M remains window-move); plain arrows cycle the marked space between displays, Shift+arrows target the display in that physical direction (`DisplayArrangement` nearest-neighbor scoring over `NSScreen.frame`, falling back to cycling when no arrangement is set), Enter executes, Esc cancels
+- GUI: **Cmd+Shift+M** enters space-move mode (Cmd+M remains window-move); plain arrows cycle the marked space between displays, Shift+arrows target the display in that physical direction (`DisplayArrangement` nearest-neighbor scoring over `NSScreen.frame`, wrapping past the far edge to the opposite end of the chain — but never wrapping on an axis with no displays; falls back to cycling when no arrangement is set), Enter executes, Esc cancels
 - Verified live on a 4-display setup in all directions: external → built-in, built-in → external, external → external, including pre-switch off an active Space
 
 ### Cross-Space Window Activation Requires .app Bundle
@@ -216,7 +217,7 @@ Private CGS/SkyLight APIs (`SLSMoveWindowsToManagedSpace`, `CGSAddWindowsToSpace
 
 **Limitations of MC drag approach:**
 - Timing-sensitive — delays between activation, MC open, drag initiation, and position re-query must be tuned
-- Window matched by title string — duplicate titles could match the wrong window
+- Window matched by title string — identical duplicate titles on the same display could still match the wrong window (exact-match ties break by AX child order)
 - Briefly visible MC animation during the move (~2s)
 - Depends on Mission Control's AX hierarchy structure (could change across macOS versions)
 

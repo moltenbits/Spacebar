@@ -1845,15 +1845,13 @@ public class SpaceManager {
     let currentSpaceIDs = Set(allSpaces.filter(\.isCurrent).map(\.id))
     let sourceSpaceIDs = dataSource.fetchSpacesForWindow(windowID)
     let needsSpaceSwitch = !sourceSpaceIDs.contains(where: { currentSpaceIDs.contains($0) })
+    let sourceSpace = allSpaces.first(where: { sourceSpaceIDs.contains($0.id) })
 
     // For a no-activate move, remember the Space that was current on the
     // window's display before we switch away to grab it, so the user's view
     // can be restored afterwards.
     let originalCurrentSpaceID: UInt64? = {
-      guard !activateAfterMove && needsSpaceSwitch else { return nil }
-      guard
-        let sourceSpace = allSpaces.first(where: { sourceSpaceIDs.contains($0.id) })
-      else { return nil }
+      guard !activateAfterMove && needsSpaceSwitch, let sourceSpace else { return nil }
       return allSpaces.first(where: { $0.isCurrent && $0.displayUUID == sourceSpace.displayUUID })?
         .id
     }()
@@ -1864,11 +1862,14 @@ public class SpaceManager {
     Thread.sleep(forTimeInterval: needsSpaceSwitch ? 0.8 : 0.25)
 
     // 5. Perform the MC drag. Pass target display so the space button is found
-    //    on the correct display (supports cross-display moves).
+    //    on the correct display (supports cross-display moves), and source
+    //    display so the thumbnail search trusts the window's own display first.
     let targetScreenNumber = Self.displayIDForUUID(targetSpace.displayUUID)
+    let sourceScreenNumber = sourceSpace.flatMap { Self.displayIDForUUID($0.displayUUID) }
     let moved = moveWindowInMC(
       windowTitle: windowTitle, targetSpaceTitle: targetSpaceTitle,
-      targetScreenNumber: targetScreenNumber, switchToTarget: activateAfterMove)
+      targetScreenNumber: targetScreenNumber, sourceScreenNumber: sourceScreenNumber,
+      switchToTarget: activateAfterMove)
 
     if moved {
       if activateAfterMove {
@@ -1892,6 +1893,59 @@ public class SpaceManager {
     return moved
   }
 
+  /// Picks the Mission Control thumbnail matching `windowTitle` from
+  /// per-display title lists. `displayTitles[0]` must be the display showing
+  /// the window's own space when known — its thumbnails are trusted first.
+  ///
+  /// An exact title match wins wherever it appears (earlier displays break
+  /// ties). Only when no exact match exists is a case-insensitive substring
+  /// match accepted, and only unambiguously: unique on the source display,
+  /// else unique across all displays. An ambiguous substring must never
+  /// grab another app's window — a wrong match drags a bystander window
+  /// between spaces.
+  static func matchWindowThumbnail(
+    displayTitles: [[String?]], windowTitle: String
+  ) -> (display: Int, index: Int)? {
+    for (display, titles) in displayTitles.enumerated() {
+      if let index = titles.firstIndex(where: { $0 == windowTitle }) {
+        return (display, index)
+      }
+    }
+
+    var matches: [(display: Int, index: Int)] = []
+    for (display, titles) in displayTitles.enumerated() {
+      for (index, title) in titles.enumerated()
+      where title?.localizedCaseInsensitiveContains(windowTitle) == true {
+        matches.append((display, index))
+      }
+    }
+    let onSourceDisplay = matches.filter { $0.display == 0 }
+    if onSourceDisplay.count == 1 { return onSourceDisplay[0] }
+    if onSourceDisplay.isEmpty && matches.count == 1 { return matches[0] }
+    return nil
+  }
+
+  /// Reorders `displays` so the one whose `AXDisplayID` matches
+  /// `screenNumber` comes first; unchanged when nil or not found.
+  private static func orderDisplays(
+    _ displays: [AXUIElement], preferring screenNumber: CGDirectDisplayID?
+  ) -> [AXUIElement] {
+    guard let screenNumber else { return displays }
+    let preferred = displays.first { display in
+      var valueRef: CFTypeRef?
+      if AXUIElementCopyAttributeValue(display, "AXDisplayID" as CFString, &valueRef)
+        == .success,
+        let displayID = valueRef as? Int,
+        CGDirectDisplayID(displayID) == screenNumber
+      {
+        return true
+      }
+      return false
+    }
+    guard let preferred else { return displays }
+    return [preferred] + displays.filter { $0 != preferred }
+  }
+
   /// Moves a window to a different Space by simulating a drag in Mission Control.
   ///
   /// Opens Mission Control, searches ALL displays for the window thumbnail and
@@ -1902,6 +1956,9 @@ public class SpaceManager {
   ///   - windowTitle: Substring to match against MC window thumbnail titles.
   ///   - targetSpaceTitle: Exact title of the target space (e.g., "Desktop 2").
   ///   - targetScreenNumber: Screen number of the display containing the target space.
+  ///   - sourceScreenNumber: Screen number of the display showing the window's
+  ///     space; its thumbnails are searched first so a similarly-titled window
+  ///     on another display cannot shadow the real one.
   ///   - verbose: Print diagnostic output.
   ///   - switchToTarget: When true (default), the target space button is pressed
   ///     after the drop, switching to it (and dismissing MC). When false, MC is
@@ -1910,7 +1967,8 @@ public class SpaceManager {
   @discardableResult
   public func moveWindowInMC(
     windowTitle: String, targetSpaceTitle: String,
-    targetScreenNumber: CGDirectDisplayID? = nil, verbose: Bool = false,
+    targetScreenNumber: CGDirectDisplayID? = nil,
+    sourceScreenNumber: CGDirectDisplayID? = nil, verbose: Bool = false,
     switchToTarget: Bool = true
   ) -> Bool {
     guard AXIsProcessTrusted() else {
@@ -1959,36 +2017,31 @@ public class SpaceManager {
         Self.axStringAttribute($0, name: "AXIdentifier") == "mc.display"
       }
 
-      // Search ALL displays for the window thumbnail
-      var windowButton: AXUIElement?
-      var windowCenter: CGPoint?
-      for display in allDisplays {
-        guard let mcWindows = Self.axChildWithIdentifier(display, identifier: "mc.windows") else {
-          continue
-        }
-        let buttons = Self.axChildren(mcWindows)
-        // Exact match first
-        if let exact = buttons.first(where: {
-          Self.axStringAttribute($0, name: "AXTitle") == windowTitle
-        }) {
-          windowButton = exact
-          windowCenter = Self.axCenter(exact)
-          break
-        }
-        // Substring fallback
-        let matches = buttons.filter {
-          (Self.axStringAttribute($0, name: "AXTitle") ?? "")
-            .localizedCaseInsensitiveContains(windowTitle)
-        }
-        if matches.count == 1, let match = matches.first {
-          windowButton = match
-          windowCenter = Self.axCenter(match)
-          break
-        }
+      // Search for the window thumbnail — the window's own display first,
+      // exact matches on ANY display before any substring match. A substring
+      // match alone is trusted only when unambiguous, so a similarly-titled
+      // window visible on another display (e.g. a terminal at the project
+      // path) can't get grabbed and dragged instead of the real one.
+      let thumbnailSearchOrder = Self.orderDisplays(
+        allDisplays, preferring: sourceScreenNumber)
+      let buttonsPerDisplay = thumbnailSearchOrder.map { display in
+        Self.axChildWithIdentifier(display, identifier: "mc.windows")
+          .map(Self.axChildren) ?? []
       }
-
-      guard let windowButton, let windowCenter else {
+      let titlesPerDisplay = buttonsPerDisplay.map { buttons in
+        buttons.map { Self.axStringAttribute($0, name: "AXTitle") }
+      }
+      guard
+        let match = Self.matchWindowThumbnail(
+          displayTitles: titlesPerDisplay, windowTitle: windowTitle)
+      else {
         print("moveWindowInMC: No window matching \"\(windowTitle)\" on any display")
+        Self.dismissMissionControl()
+        return
+      }
+      let windowButton = buttonsPerDisplay[match.display][match.index]
+      guard let windowCenter = Self.axCenter(windowButton) else {
+        print("moveWindowInMC: matched window has no readable position")
         Self.dismissMissionControl()
         return
       }
@@ -1999,27 +2052,8 @@ public class SpaceManager {
       }
 
       // Build display search order — target display first
-      let displaySearchOrder: [AXUIElement]
-      if let targetScreenNumber {
-        let targetDisplay = allDisplays.first { display in
-          var valueRef: CFTypeRef?
-          if AXUIElementCopyAttributeValue(display, "AXDisplayID" as CFString, &valueRef)
-            == .success,
-            let displayID = valueRef as? Int,
-            CGDirectDisplayID(displayID) == targetScreenNumber
-          {
-            return true
-          }
-          return false
-        }
-        if let targetDisplay {
-          displaySearchOrder = [targetDisplay] + allDisplays.filter { $0 != targetDisplay }
-        } else {
-          displaySearchOrder = allDisplays
-        }
-      } else {
-        displaySearchOrder = allDisplays
-      }
+      let displaySearchOrder = Self.orderDisplays(
+        allDisplays, preferring: targetScreenNumber)
 
       // Locate the spaces bar that contains the target space.
       var barList: AXUIElement?

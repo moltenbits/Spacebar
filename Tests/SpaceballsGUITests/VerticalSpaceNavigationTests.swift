@@ -117,24 +117,156 @@ struct VerticalSpaceNavigationTests {
     #expect(vm.selectedItem == firstItem(of: upper[upper.count - 1]))
   }
 
-  @Test("Down with no display below is a no-op")
-  func downAtBottomIsNoOp() {
-    let vm = makeViewModel(arranged: true)
-    let lower = sections(vm, on: "display-lower")
-    let start = firstItem(of: lower[lower.count - 1])
-    vm.selectedItem = start
-    vm.moveToNextSpace()
-    #expect(vm.selectedItem == start)
-  }
-
-  @Test("Up with no display above is a no-op")
-  func upAtTopIsNoOp() {
+  @Test("Down from the bottom display's last space wraps to the top display's first")
+  func downAtBottomWrapsToTop() {
     let vm = makeViewModel(arranged: true)
     let upper = sections(vm, on: "display-upper")
-    let start = firstItem(of: upper[0])
-    vm.selectedItem = start
+    let lower = sections(vm, on: "display-lower")
+    vm.selectedItem = firstItem(of: lower[lower.count - 1])
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == firstItem(of: upper[0]))
+  }
+
+  @Test("Up from the top display's first space wraps to the bottom display's last")
+  func upAtTopWrapsToBottom() {
+    let vm = makeViewModel(arranged: true)
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+    vm.selectedItem = firstItem(of: upper[0])
     vm.moveToPreviousSpace()
-    #expect(vm.selectedItem == start)
+    #expect(vm.selectedItem == firstItem(of: lower[lower.count - 1]))
+  }
+
+  @Test("Down from the meta display's last space visits Spaces, Settings, then crosses on")
+  func downThroughMetaRows() {
+    let vm = makeViewModel(arranged: true)
+    vm.metaRowsDisplayUUID = "display-lower"
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+
+    vm.selectedItem = firstItem(of: lower[lower.count - 1])
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == .spaces)
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == .settings)
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == firstItem(of: upper[0]))
+  }
+
+  @Test("Up arriving at the meta display lands on Settings, Spaces, then its last space")
+  func upThroughMetaRows() {
+    let vm = makeViewModel(arranged: true)
+    vm.metaRowsDisplayUUID = "display-lower"
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+
+    // Upper display's first space; ↑ wraps down to the meta display, whose
+    // bottom-most rows are Settings then Spaces then its last space.
+    vm.selectedItem = firstItem(of: upper[0])
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .settings)
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .spaces)
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == firstItem(of: lower[lower.count - 1]))
+  }
+
+  @Test("Crossing into the meta display from above skips the meta rows")
+  func downIntoMetaDisplaySkipsMetaRows() {
+    let vm = makeViewModel(arranged: true)
+    vm.metaRowsDisplayUUID = "display-lower"
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+
+    // The meta rows sit at the BOTTOM of the meta display's panel — entering
+    // it from the top goes straight to its first space.
+    vm.selectedItem = firstItem(of: upper[upper.count - 1])
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == firstItem(of: lower[0]))
+  }
+
+  @Test("A non-meta display's boundary keeps the plain vertical crossing")
+  func nonMetaDisplayCrossesWithoutMetaRows() {
+    let vm = makeViewModel(arranged: true)
+    vm.metaRowsDisplayUUID = "display-lower"
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+
+    // ↑ off the top of the upper (non-meta) display's... first space wraps
+    // to the meta display (covered above); ↑ from the LOWER display's first
+    // space crosses to the upper display's last space with no meta detour.
+    vm.selectedItem = firstItem(of: lower[0])
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == firstItem(of: upper[upper.count - 1]))
+  }
+
+  @Test("Tab past a non-meta group's end flows into the next group, skipping the meta rows")
+  func tabSkipsMetaRowsAtNonMetaBoundary() {
+    let vm = makeViewModel(arranged: true)
+    vm.metaRowsDisplayUUID = "display-upper"
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+
+    // displayOrder leads with display-lower (non-meta): Tab off its last
+    // window must land on the next group's first item, not .spaces.
+    vm.selectedItem = firstItem(of: lower[lower.count - 1])
+    vm.moveSelectionDown()
+    #expect(vm.selectedItem == firstItem(of: upper[0]))
+  }
+
+  @Test("Tab visits Spaces and Settings at the meta group's end, then continues")
+  func tabVisitsMetaRowsAtMetaBoundary() {
+    let vm = makeViewModel(arranged: true)
+    vm.metaRowsDisplayUUID = "display-lower"
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+
+    vm.selectedItem = firstItem(of: lower[lower.count - 1])
+    vm.moveSelectionDown()
+    #expect(vm.selectedItem == .spaces)
+    vm.moveSelectionDown()
+    #expect(vm.selectedItem == .settings)
+    vm.moveSelectionDown()
+    #expect(vm.selectedItem == firstItem(of: upper[0]))
+  }
+
+  @Test("Shift-Tab into a preceding meta group enters through Settings")
+  func shiftTabEntersMetaGroupThroughSettings() {
+    let vm = makeViewModel(arranged: true)
+    vm.metaRowsDisplayUUID = "display-lower"
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+
+    // Upper group follows the lower (meta) group: ↑ from its first item
+    // backs into Settings → Spaces → the meta group's last item.
+    vm.selectedItem = firstItem(of: upper[0])
+    vm.moveSelectionUp()
+    #expect(vm.selectedItem == .settings)
+    vm.moveSelectionUp()
+    #expect(vm.selectedItem == .spaces)
+    vm.moveSelectionUp()
+    #expect(vm.selectedItem == firstItem(of: lower[lower.count - 1]))
+  }
+
+  @Test("Shift-Tab into a preceding non-meta group lands on its last item")
+  func shiftTabSkipsMetaRowsAtNonMetaBoundary() {
+    let vm = makeViewModel(arranged: true)
+    vm.metaRowsDisplayUUID = "display-upper"
+    let upper = sections(vm, on: "display-upper")
+    let lower = sections(vm, on: "display-lower")
+
+    vm.selectedItem = firstItem(of: upper[0])
+    vm.moveSelectionUp()
+    #expect(vm.selectedItem == firstItem(of: lower[lower.count - 1]))
+  }
+
+  @Test("Without a meta display, Tab keeps its stop at every group boundary")
+  func tabWithoutMetaDisplayKeepsAllStops() {
+    let vm = makeViewModel(arranged: true)
+    let lower = sections(vm, on: "display-lower")
+    vm.selectedItem = firstItem(of: lower[lower.count - 1])
+    vm.moveSelectionDown()
+    #expect(vm.selectedItem == .spaces)
   }
 
   @Test("Without an arrangement, group-boundary stops behave as before")

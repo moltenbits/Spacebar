@@ -336,6 +336,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
       }
       viewModel.displayOrder = order
+
+      // The Spaces/Settings rows live on the built-in display's panel only
+      // (falling back to the first screen when the lid is closed).
+      let screenUUIDs = NSScreen.screens.compactMap { Self.displayUUID(for: $0) }
+      let builtin = SpaceManager.builtinDisplayUUID()
+      viewModel.metaRowsDisplayUUID =
+        builtin.flatMap { screenUUIDs.contains($0) ? $0 : nil } ?? screenUUIDs.first
+    } else {
+      viewModel.metaRowsDisplayUUID = nil
     }
 
     viewModel.resetSelection()
@@ -485,8 +494,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       })
   }
 
-  /// Moves the selection to the display physically in `direction`; no-op
-  /// when there is none in that direction.
+  /// Moves the selection to the display physically in `direction`, wrapping
+  /// past the far edge; no-op when no display lies on that axis.
   private func navigateDisplay(_ direction: ArrangementDirection) {
     // Never touch panel content while a move is pending — refresh() would wipe
     // the visual relocation and the marked item's context (issue #18). The
@@ -501,7 +510,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       ? (viewModel.activeDisplayUUID ?? viewModel.displayOrder.first)
       : currentPanelDisplayUUID
     guard let currentUUID,
-      let targetUUID = Self.currentArrangement().neighborUUID(
+      let targetUUID = Self.currentArrangement().wrappedNeighborUUID(
         of: currentUUID, direction: direction)
     else { return }
     focusDisplay(uuid: targetUUID)
@@ -689,6 +698,13 @@ extension AppDelegate: KeyInterceptorDelegate {
 
   func keyInterceptorShowPanel() {
     showPanel()
+  }
+
+  func keyInterceptorAdvanceAfterOpen() {
+    // The Cmd+Tab that opened the panel: advance to the second row unless
+    // the active window sits alone on its display's only space.
+    guard !viewModel.shouldKeepInitialSelectionOnOpen else { return }
+    keyInterceptorMoveDown()
   }
 
   func keyInterceptorMoveDown() {

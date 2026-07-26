@@ -189,6 +189,12 @@ public final class SwitcherViewModel: ObservableObject {
   /// AppKit context) directional moves fall back to cycling in CGS order.
   public var displayArrangement: DisplayArrangement?
 
+  /// In mode 3 ("All" panels), the display whose panel hosts the Spaces and
+  /// Settings rows — every other panel hides them, and the ↑/↓ space cycle
+  /// visits them at this display's bottom boundary. nil (single-panel modes)
+  /// shows them on every panel with no traversal detour.
+  public var metaRowsDisplayUUID: String?
+
   /// When true, spaces with no windows are included in the switcher.
   public var showEmptySpaces: Bool = true
 
@@ -602,11 +608,11 @@ public final class SwitcherViewModel: ObservableObject {
   // MARK: - Selection
 
   /// Display group boundary indices within `flatSelectableItems` (excluding the trailing `.settings`).
-  /// Returns (startIndex, endIndex) pairs, one per display in `displayOrder`.
-  private func displayGroupRanges() -> [(start: Int, end: Int)] {
+  /// Returns (startIndex, endIndex, displayUUID) triples, one per display in `displayOrder`.
+  private func displayGroupRanges() -> [(start: Int, end: Int, uuid: String)] {
     guard !displayOrder.isEmpty else { return [] }
     let sections = filteredSections
-    var ranges: [(start: Int, end: Int)] = []
+    var ranges: [(start: Int, end: Int, uuid: String)] = []
     var idx = 0
     for uuid in displayOrder {
       let start = idx
@@ -614,7 +620,7 @@ public final class SwitcherViewModel: ObservableObject {
         idx += section.windows.isEmpty ? 1 : section.windows.count
       }
       if idx > start {
-        ranges.append((start: start, end: idx - 1))
+        ranges.append((start: start, end: idx - 1, uuid: uuid))
       }
     }
     return ranges
@@ -646,10 +652,16 @@ public final class SwitcherViewModel: ObservableObject {
         return
       }
 
-      // At end of a display group → go to .spaces
+      // At end of a display group → visit the meta rows when this group's
+      // panel hosts them, otherwise flow straight into the next group.
       if let groupIdx = ranges.firstIndex(where: { $0.end == idx }) {
-        settingsDisplayIndex = groupIdx
-        selectedItem = .spaces
+        if metaRowsDisplayUUID == nil || ranges[groupIdx].uuid == metaRowsDisplayUUID {
+          settingsDisplayIndex = groupIdx
+          selectedItem = .spaces
+        } else {
+          let nextGroup = (groupIdx + 1) % ranges.count
+          selectedItem = items[ranges[nextGroup].start]
+        }
         return
       }
 
@@ -695,10 +707,17 @@ public final class SwitcherViewModel: ObservableObject {
         return
       }
 
-      // At start of a display group → go to .settings (source = previous group, wrapping)
+      // At start of a display group → back into the previous group
+      // (wrapping): through .settings when that group's panel hosts the
+      // meta rows, else straight onto its last item.
       if let groupIdx = ranges.firstIndex(where: { $0.start == idx }) {
-        settingsDisplayIndex = (groupIdx - 1 + ranges.count) % ranges.count
-        selectedItem = .settings
+        let prevGroup = (groupIdx - 1 + ranges.count) % ranges.count
+        if metaRowsDisplayUUID == nil || ranges[prevGroup].uuid == metaRowsDisplayUUID {
+          settingsDisplayIndex = prevGroup
+          selectedItem = .settings
+        } else {
+          selectedItem = items[ranges[prevGroup].end]
+        }
         return
       }
 
@@ -731,6 +750,24 @@ public final class SwitcherViewModel: ObservableObject {
     selectedItem = items.first
   }
 
+  /// True when the Cmd+Tab that just opened the panel should keep the
+  /// selection on the first row instead of advancing. Normally the advance
+  /// lands on the second row — the user rarely wants the window they're
+  /// already on. But when the active window is the ONLY window on its
+  /// display's ONLY visible space, the second row lives on a different
+  /// space entirely, and the highlight opening far from the space the user
+  /// is looking at reads as wrong — hold it on the active window instead.
+  public var shouldKeepInitialSelectionOnOpen: Bool {
+    guard case .windowRow(let id)? = selectedItem,
+      let section = filteredSections.first(where: {
+        $0.windows.contains(where: { $0.id == id })
+      }),
+      section.isCurrent,
+      section.windows.count == 1
+    else { return false }
+    return filteredSections.filter { $0.displayUUID == section.displayUUID }.count == 1
+  }
+
   /// Builds a window-ID → space-ID lookup from the current sections.
   private func windowSpaceMap() -> [Int: UInt64] {
     var map: [Int: UInt64] = [:]
@@ -753,27 +790,43 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   /// First selectable item of the display reached by walking the physical
-  /// arrangement in `direction`. Entering downward lands on that display's
-  /// first space, entering upward on its last — the spatially nearest end.
-  /// Walks past displays with no visible sections; nil when nothing lies
-  /// in that direction.
-  private func verticalNeighborEntry(
+  /// arrangement in `direction`, plus which display it landed on. Entering
+  /// downward lands on that display's first space, entering upward on its
+  /// last — the spatially nearest end. Walks past displays with no visible
+  /// sections and wraps past the far edge; nil when no display lies on that
+  /// axis at all.
+  private func verticalNeighborLanding(
     from displayUUID: String, direction: ArrangementDirection
-  ) -> SelectedItem? {
+  ) -> (item: SelectedItem, displayUUID: String)? {
     guard let arrangement = displayArrangement else { return nil }
     var visited: Set<String> = [displayUUID]
     var current = displayUUID
-    while let next = arrangement.neighborUUID(of: current, direction: direction),
+    while let next = arrangement.wrappedNeighborUUID(of: current, direction: direction),
       !visited.contains(next)
     {
       visited.insert(next)
       let displaySections = filteredSections.filter { $0.displayUUID == next }
       if let target = direction == .down ? displaySections.first : displaySections.last {
-        return target.windows.first.map { .windowRow($0.id) } ?? .spaceHeader(target.id)
+        let item =
+          target.windows.first.map { SelectedItem.windowRow($0.id) }
+          ?? .spaceHeader(target.id)
+        return (item, next)
       }
       current = next
     }
     return nil
+  }
+
+  /// Records the display group containing `position` so .spaces/.settings
+  /// selection knows which group the user came from (highlight context and
+  /// the ↑-from-Spaces return path).
+  private func rememberSettingsGroup(containing position: Int) {
+    let ranges = displayGroupRanges()
+    if let groupIdx = ranges.firstIndex(where: {
+      position >= $0.start && position <= $0.end
+    }) {
+      settingsDisplayIndex = groupIdx
+    }
   }
 
   public func moveToNextSpace() {
@@ -793,6 +846,14 @@ public final class SwitcherViewModel: ObservableObject {
     }
     if case .settings = current {
       if !displayOrder.isEmpty {
+        // Meta display set: ↓ off Settings continues the vertical crossing
+        // from the meta display's bottom (wrapping past the far edge).
+        if let metaDisplay = metaRowsDisplayUUID,
+          let landing = verticalNeighborLanding(from: metaDisplay, direction: .down)
+        {
+          selectedItem = landing.item
+          return
+        }
         // Mode 3: go to next display group's first space
         let ranges = displayGroupRanges()
         let nextGroup = (settingsDisplayIndex + 1) % ranges.count
@@ -814,16 +875,24 @@ public final class SwitcherViewModel: ObservableObject {
     // Mode 3 with a known arrangement: at a display's last space, ↓ continues
     // onto the display physically BELOW, entering at its first space — the
     // crossing follows the arrangement, not displayOrder (which is MRU-led).
-    // No display below is a no-op.
+    // Past the bottom display it wraps to the top; no vertical axis at all
+    // is a no-op.
     if !displayOrder.isEmpty, displayArrangement != nil, let currentSpace,
       let currentSection = filteredSections.first(where: { $0.id == currentSpace }),
       filteredSections.last(where: { $0.displayUUID == currentSection.displayUUID })?.id
         == currentSpace
     {
-      if let entry = verticalNeighborEntry(
+      // The meta display's panel ends with the Spaces and Settings rows —
+      // ↓ visits them before crossing off the display.
+      if currentSection.displayUUID == metaRowsDisplayUUID {
+        rememberSettingsGroup(containing: currentPos)
+        selectedItem = .spaces
+        return
+      }
+      if let landing = verticalNeighborLanding(
         from: currentSection.displayUUID, direction: .down)
       {
-        selectedItem = entry
+        selectedItem = landing.item
       }
       return
     }
@@ -911,17 +980,26 @@ public final class SwitcherViewModel: ObservableObject {
     let currentSpace = spaceID(for: current, using: map)
 
     // Mode 3 with a known arrangement: at a display's first space, ↑ continues
-    // onto the display physically ABOVE, entering at its last space.
-    // No display above is a no-op.
+    // onto the display physically ABOVE, entering at its last space. Past the
+    // top display it wraps to the bottom; no vertical axis at all is a no-op.
     if !displayOrder.isEmpty, displayArrangement != nil, let currentSpace,
       let currentSection = filteredSections.first(where: { $0.id == currentSpace }),
       filteredSections.first(where: { $0.displayUUID == currentSection.displayUUID })?.id
         == currentSpace
     {
-      if let entry = verticalNeighborEntry(
+      if let landing = verticalNeighborLanding(
         from: currentSection.displayUUID, direction: .up)
       {
-        selectedItem = entry
+        // Entering the meta display from below lands on its bottom-most
+        // rows first: Settings, then Spaces, then its last space.
+        if landing.displayUUID == metaRowsDisplayUUID {
+          if let pos = items.firstIndex(of: landing.item) {
+            rememberSettingsGroup(containing: pos)
+          }
+          selectedItem = .settings
+        } else {
+          selectedItem = landing.item
+        }
       }
       return
     }
@@ -1238,9 +1316,9 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   /// Moves the marked window row toward the display in `direction` on the
-  /// physical arrangement. No-op when the arrangement has no display there
-  /// (or it has no visible section to receive the row); falls back to
-  /// cycling when no arrangement is available.
+  /// physical arrangement, wrapping past the far edge. No-op when no display
+  /// lies on that axis (or the target has no visible section to receive the
+  /// row); falls back to cycling when no arrangement is available.
   public func moveMarkedWindow(inDirection direction: ArrangementDirection) {
     guard moveMode, let windowID = markedWindowID,
       let sourceIdx = sections.firstIndex(where: {
@@ -1255,7 +1333,7 @@ public final class SwitcherViewModel: ObservableObject {
     }
 
     guard
-      let targetUUID = arrangement.neighborUUID(
+      let targetUUID = arrangement.wrappedNeighborUUID(
         of: sections[sourceIdx].displayUUID, direction: direction),
       let targetIdx = sections.firstIndex(where: { $0.displayUUID == targetUUID })
     else { return }
@@ -1467,8 +1545,9 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   /// Retargets the marked space toward the display in `direction` on the
-  /// physical arrangement. No-op when the arrangement has no display there;
-  /// falls back to cycling when no arrangement is available.
+  /// physical arrangement, wrapping past the far edge. No-op when no display
+  /// lies on that axis; falls back to cycling when no arrangement is
+  /// available.
   public func moveMarkedSpace(inDirection direction: ArrangementDirection) {
     guard spaceMoveMode, let spaceID = markedSpaceID,
       let sectionIndex = sections.firstIndex(where: { $0.id == spaceID })
@@ -1480,7 +1559,7 @@ public final class SwitcherViewModel: ObservableObject {
     }
 
     guard
-      let targetUUID = arrangement.neighborUUID(
+      let targetUUID = arrangement.wrappedNeighborUUID(
         of: sections[sectionIndex].displayUUID, direction: direction),
       let target = spaceMoveDisplays.first(where: { $0.uuid == targetUUID })
     else { return }

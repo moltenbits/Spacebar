@@ -80,6 +80,55 @@ struct DisplayArrangementTests {
   }
 }
 
+@Suite("Display Arrangement — wrap-around")
+struct DisplayArrangementWrapTests {
+
+  @Test("A direct neighbor is preferred over wrapping")
+  func directNeighborBeatsWrap() {
+    let a = makePlusArrangement()
+    #expect(a.wrappedNeighborUUID(of: "center", direction: .right) == "right")
+    #expect(a.wrappedNeighborUUID(of: "left", direction: .right) == "center")
+  }
+
+  @Test("Past the far edge, the direction wraps to the opposite end of the chain")
+  func wrapsToOppositeEnd() {
+    let a = makePlusArrangement()
+    #expect(a.wrappedNeighborUUID(of: "right", direction: .right) == "left")
+    #expect(a.wrappedNeighborUUID(of: "left", direction: .left) == "right")
+    #expect(a.wrappedNeighborUUID(of: "up", direction: .up) == "down")
+    #expect(a.wrappedNeighborUUID(of: "down", direction: .down) == "up")
+  }
+
+  @Test("An axis with no displays on it does not wrap")
+  func emptyAxisDoesNotWrap() {
+    // Two side-by-side displays: no vertical relationship exists, so ↑/↓
+    // must stay inert rather than wrapping onto the horizontal sibling.
+    let a = DisplayArrangement(displays: [
+      .init(uuid: "a", frame: CGRect(x: 0, y: 0, width: 1000, height: 1000)),
+      .init(uuid: "b", frame: CGRect(x: 1000, y: 0, width: 1000, height: 1000)),
+    ])
+    #expect(a.wrappedNeighborUUID(of: "a", direction: .up) == nil)
+    #expect(a.wrappedNeighborUUID(of: "a", direction: .down) == nil)
+    #expect(a.wrappedNeighborUUID(of: "a", direction: .left) == "b")
+    #expect(a.wrappedNeighborUUID(of: "b", direction: .right) == "a")
+  }
+
+  @Test("A single display never wraps onto itself")
+  func singleDisplayNeverWraps() {
+    let a = DisplayArrangement(displays: [
+      .init(uuid: "only", frame: CGRect(x: 0, y: 0, width: 1000, height: 1000))
+    ])
+    #expect(a.wrappedNeighborUUID(of: "only", direction: .right) == nil)
+    #expect(a.wrappedNeighborUUID(of: "only", direction: .up) == nil)
+  }
+
+  @Test("Unknown display resolves to nil")
+  func unknownDisplayResolvesToNil() {
+    let a = makePlusArrangement()
+    #expect(a.wrappedNeighborUUID(of: "ghost", direction: .right) == nil)
+  }
+}
+
 /// A real-world four-display arrangement (y-up coordinates): built-in laptop
 /// at the bottom, a large landscape display above whose center sits a hair
 /// (74pt) to the RIGHT of the built-in's center, and a tall portrait display
@@ -135,5 +184,17 @@ struct DisplayArrangementQuadTests {
     #expect(a.neighborUUID(of: "top", direction: .right) == "right")
     #expect(a.neighborUUID(of: "top", direction: .left) == "left")
     #expect(a.neighborUUID(of: "top", direction: .down) == "builtin")
+  }
+
+  @Test("Wrapping follows the same chain the arrows walk")
+  func wrapFollowsTheNavigationChain() {
+    let a = makeQuadArrangement()
+    // Rightward chain is left → top → right, so wrapping right from the
+    // right portrait lands on the left portrait (and vice versa).
+    #expect(a.wrappedNeighborUUID(of: "right", direction: .right) == "left")
+    #expect(a.wrappedNeighborUUID(of: "left", direction: .left) == "right")
+    // Vertical chain is builtin → top, so the two wrap onto each other.
+    #expect(a.wrappedNeighborUUID(of: "top", direction: .up) == "builtin")
+    #expect(a.wrappedNeighborUUID(of: "builtin", direction: .down) == "top")
   }
 }
