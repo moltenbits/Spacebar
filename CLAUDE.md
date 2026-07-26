@@ -151,6 +151,7 @@ Native CGS/SkyLight move APIs (`SLSMoveWindowsToManagedSpace`, `CGSAddWindowsToS
 
 **Key details:**
 - Window thumbnails in MC are `AXButton` children of `mc.windows` with `AXTitle` = window title, `AXPosition`/`AXSize` = screen coordinates
+- Thumbnail matching (`matchWindowThumbnail`, pure/unit-tested) searches the window's own display first and prefers an exact title match on ANY display over any substring match; a substring match is accepted only when unambiguous (unique on the source display, else unique globally). MC shows every display's current space, so a similarly-titled window on another display (e.g. a terminal at the project path vs. an IDE with the project name in its title) would otherwise get grabbed and dragged instead of the real one.
 - Space buttons shift when a window is dragged into the bar (placeholder insertion). Positions must be read AFTER initiating the drag, not before.
 - Space buttons are matched by title ("Desktop N"), not index, because placeholder insertion shifts indices.
 - The `move` CLI subcommand accepts window titles or IDs, and space names or IDs.
@@ -216,7 +217,7 @@ Private CGS/SkyLight APIs (`SLSMoveWindowsToManagedSpace`, `CGSAddWindowsToSpace
 
 **Limitations of MC drag approach:**
 - Timing-sensitive — delays between activation, MC open, drag initiation, and position re-query must be tuned
-- Window matched by title string — duplicate titles could match the wrong window
+- Window matched by title string — identical duplicate titles on the same display could still match the wrong window (exact-match ties break by AX child order)
 - Briefly visible MC animation during the move (~2s)
 - Depends on Mission Control's AX hierarchy structure (could change across macOS versions)
 
