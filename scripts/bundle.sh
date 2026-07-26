@@ -43,7 +43,9 @@ if [[ -z "${VERSION:-}" ]]; then
     if [[ "$DISTRIBUTION_SIGNING" == true ]]; then
         VERSION="$(git -C "$PROJECT_DIR" describe --tags --always --dirty 2>/dev/null | sed 's/^v//')"
     else
-        BASE_VERSION="$(git -C "$PROJECT_DIR" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')"
+        # No tags visible (shallow CI checkout) exits non-zero — fall back
+        # to 0.0.0 rather than tripping set -e.
+        BASE_VERSION="$(git -C "$PROJECT_DIR" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
         MINUTE_OF_DAY=$((10#$(date +%H) * 60 + 10#$(date +%M)))
         VERSION="${BASE_VERSION:-0.0.0}.$(date +%y.%m.%d).${MINUTE_OF_DAY}"
     fi
