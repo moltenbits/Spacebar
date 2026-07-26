@@ -1000,6 +1000,12 @@ public final class SwitcherViewModel: ObservableObject {
         } else {
           selectedItem = landing.item
         }
+      } else if currentSection.displayUUID == metaRowsDisplayUUID {
+        // Nothing above (single display, or no vertical axis): the meta
+        // display's carousel wraps through its own bottom rows — mirrors
+        // ↓'s fallback, which wraps from Settings to the first space.
+        rememberSettingsGroup(containing: currentPos)
+        selectedItem = .settings
       }
       return
     }

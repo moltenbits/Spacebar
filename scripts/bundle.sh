@@ -21,11 +21,6 @@ if [[ "$BUILD_CONFIG" != "debug" && "$BUILD_CONFIG" != "release" ]]; then
     exit 1
 fi
 
-if [[ -z "${VERSION:-}" ]]; then
-    VERSION="$(git -C "$PROJECT_DIR" describe --tags --always --dirty 2>/dev/null | sed 's/^v//')"
-fi
-VERSION="${VERSION:-0.0.0-dev}"
-
 DISTRIBUTION_SIGNING=false
 if [[ -n "${TEAM_NAME:-}" && -n "${TEAM_ID:-}" ]]; then
     SIGN_IDENTITY="Developer ID Application: $TEAM_NAME ($TEAM_ID)"
@@ -39,6 +34,23 @@ elif [[ -z "${SIGN_IDENTITY:-}" ]]; then
         SIGN_IDENTITY="-"
     fi
 fi
+
+# Distribution builds carry the tag-derived version. Dev builds stamp a build
+# timestamp onto the latest release version — <tag>.<YY>.<MM>.<DD>.<minute of
+# day> — so the About pane makes it unmistakable which build is running and
+# records to the minute when it was built.
+if [[ -z "${VERSION:-}" ]]; then
+    if [[ "$DISTRIBUTION_SIGNING" == true ]]; then
+        VERSION="$(git -C "$PROJECT_DIR" describe --tags --always --dirty 2>/dev/null | sed 's/^v//')"
+    else
+        # No tags visible (shallow CI checkout) exits non-zero — fall back
+        # to 0.0.0 rather than tripping set -e.
+        BASE_VERSION="$(git -C "$PROJECT_DIR" describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+        MINUTE_OF_DAY=$((10#$(date +%H) * 60 + 10#$(date +%M)))
+        VERSION="${BASE_VERSION:-0.0.0}.$(date +%y.%m.%d).${MINUTE_OF_DAY}"
+    fi
+fi
+VERSION="${VERSION:-0.0.0-dev}"
 
 echo "Building Spaceballs ($BUILD_CONFIG, version $VERSION)..."
 
