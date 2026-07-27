@@ -1110,12 +1110,27 @@ public final class SwitcherViewModel: ObservableObject {
   /// Returns the display UUID of the section containing the currently selected item.
   public var activeDisplayUUID: String? {
     switch selectedItem {
+    case .spaces, .settings, nil:
+      return nil
+    default:
+      return panelDisplayUUID(for: selectedItem)
+    }
+  }
+
+  /// Returns the display UUID of the panel that renders the given item — the
+  /// panel that must be the key window for keyboard input (e.g. inline rename)
+  /// to reach it. Unlike `activeDisplayUUID`, meta rows resolve to the panel
+  /// that hosts them.
+  public func panelDisplayUUID(for item: SelectedItem?) -> String? {
+    switch item {
     case .spaceHeader(let spaceID):
       return filteredSections.first(where: { $0.id == spaceID })?.displayUUID
     case .windowRow(let windowID):
       return filteredSections.first(where: { $0.windows.contains(where: { $0.id == windowID }) })?
         .displayUUID
-    case .spaces, .settings, nil:
+    case .spaces, .settings:
+      return metaRowsDisplayUUID
+    case nil:
       return nil
     }
   }
