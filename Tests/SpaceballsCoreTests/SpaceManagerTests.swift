@@ -339,6 +339,50 @@ struct SpaceParsingTests {
 
 // MARK: - Window Filtering Tests
 
+@Suite("Space Switching")
+struct SpaceSwitchingTests {
+
+  private func makeManager(currentSpaceID: Int) -> SpaceManager {
+    var ds = MockDataSource()
+    ds.displaySpaces = [
+      makeDisplayDict(
+        displayUUID: "display-1",
+        spaces: [
+          makeSpaceDict(id: 1, uuid: "uuid-1"),
+          makeSpaceDict(id: 2, uuid: "uuid-2"),
+          makeSpaceDict(id: 3, uuid: "uuid-3", type: 4),
+        ],
+        currentSpaceID: currentSpaceID
+      )
+    ]
+    return SpaceManager(dataSource: ds)
+  }
+
+  @Test("Switching to the already-current space is a no-op")
+  func switchToCurrentSpaceIsNoOp() throws {
+    // Must return before requiring Accessibility trust or a live display —
+    // a non-current target would throw in this environment (see below).
+    try makeManager(currentSpaceID: 1).switchToSpace(id: 1)
+  }
+
+  @Test("Switching to a non-current space still requires the full path")
+  func switchToNonCurrentSpaceProceeds() {
+    // In the test environment the full path cannot complete (no Accessibility
+    // trust and/or the mock display UUID resolves to no live display), so a
+    // throw proves the early-out did NOT fire for a non-current space.
+    #expect(throws: (any Error).self) {
+      try makeManager(currentSpaceID: 2).switchToSpace(id: 1)
+    }
+  }
+
+  @Test("A current fullscreen space still throws notDesktopSpace")
+  func currentFullscreenSpaceStillThrows() {
+    #expect(throws: SpaceSwitchError.notDesktopSpace(spaceID: 3)) {
+      try makeManager(currentSpaceID: 3).switchToSpace(id: 3)
+    }
+  }
+}
+
 @Suite("Window Filtering")
 struct WindowFilteringTests {
 

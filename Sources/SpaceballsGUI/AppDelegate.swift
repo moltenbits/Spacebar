@@ -1216,7 +1216,12 @@ extension AppDelegate: KeyInterceptorDelegate {
               $0.displayUUID == uuid && $0.type == .desktop
             }
             if let lastSpace = desktops.last {
-              try? self.viewModel.spaceManager.switchToSpace(id: lastSpace.id)
+              // Through the view model so the new space earns its MRU stamp —
+              // focus inference can't see a switch to a windowless space, and
+              // the panel would list the fresh space buried mid-list.
+              DispatchQueue.main.async {
+                self.viewModel.activateSpace(id: lastSpace.id)
+              }
             }
           }
         }
