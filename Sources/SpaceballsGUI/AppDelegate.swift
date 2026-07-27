@@ -139,6 +139,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
       .store(in: &cancellables)
 
+    // Mode 3: keyboard input routes to the key window, so the panel showing
+    // the selection must be key — otherwise inline rename types into a panel
+    // with no focused field and every keystroke beeps. `$selectedItem` emits
+    // on willSet, so the emitted value is passed rather than re-read.
+    viewModel.$selectedItem
+      .sink { [weak self] item in
+        self?.syncKeyPanel(toSelection: item)
+      }
+      .store(in: &cancellables)
+
     viewModel.spaceManager.moveTiming = appSettings.moveTiming
 
     Publishers.CombineLatest3(
@@ -541,6 +551,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       centerPanel(panel, on: targetScreen)
       currentPanelDisplayUUID = targetUUID
     }
+  }
+
+  /// Mode 3: makes the panel rendering `item` the key window, so keyboard
+  /// focus follows the selection across displays. No-op in single-panel modes
+  /// and while the panels are hidden (their displayUUIDs are nil then).
+  private func syncKeyPanel(toSelection item: SelectedItem?) {
+    guard isMultiPanelPerDisplay,
+      let uuid = viewModel.panelDisplayUUID(for: item),
+      let panel = panels.first(where: { $0.displayUUID == uuid }),
+      panel.isVisible, !panel.isKeyWindow
+    else { return }
+    panel.makeKeyAndOrderFront(nil)
+    currentPanelDisplayUUID = uuid
   }
 
   private func targetScreens() -> [NSScreen] {
@@ -1193,7 +1216,12 @@ extension AppDelegate: KeyInterceptorDelegate {
               $0.displayUUID == uuid && $0.type == .desktop
             }
             if let lastSpace = desktops.last {
-              try? self.viewModel.spaceManager.switchToSpace(id: lastSpace.id)
+              // Through the view model so the new space earns its MRU stamp —
+              // focus inference can't see a switch to a windowless space, and
+              // the panel would list the fresh space buried mid-list.
+              DispatchQueue.main.async {
+                self.viewModel.activateSpace(id: lastSpace.id)
+              }
             }
           }
         }

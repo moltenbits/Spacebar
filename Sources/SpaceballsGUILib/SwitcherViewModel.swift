@@ -1110,12 +1110,27 @@ public final class SwitcherViewModel: ObservableObject {
   /// Returns the display UUID of the section containing the currently selected item.
   public var activeDisplayUUID: String? {
     switch selectedItem {
+    case .spaces, .settings, nil:
+      return nil
+    default:
+      return panelDisplayUUID(for: selectedItem)
+    }
+  }
+
+  /// Returns the display UUID of the panel that renders the given item — the
+  /// panel that must be the key window for keyboard input (e.g. inline rename)
+  /// to reach it. Unlike `activeDisplayUUID`, meta rows resolve to the panel
+  /// that hosts them.
+  public func panelDisplayUUID(for item: SelectedItem?) -> String? {
+    switch item {
     case .spaceHeader(let spaceID):
       return filteredSections.first(where: { $0.id == spaceID })?.displayUUID
     case .windowRow(let windowID):
       return filteredSections.first(where: { $0.windows.contains(where: { $0.id == windowID }) })?
         .displayUUID
-    case .spaces, .settings, nil:
+    case .spaces, .settings:
+      return metaRowsDisplayUUID
+    case nil:
       return nil
     }
   }
@@ -1228,18 +1243,8 @@ public final class SwitcherViewModel: ObservableObject {
         // Activate the first window in this space to trigger space switch
         windowID = firstWindow.id
       } else {
-        // Empty space — activateSpace falls back to the Dock's Mission
-        // Control interface (the shared path eject/restore use too).
-        // Stamp the space MRU directly: focus-based inference in refresh()
-        // can't see this switch — an empty space has no window to move
-        // keyboard focus to its display.
-        spaceMRUHistory.removeAll { $0 == spaceID }
-        spaceMRUHistory.insert(spaceID, at: 0)
-        do {
-          try spaceManager.activateSpace(id: spaceID)
-        } catch {
-          Diagnostics.log("activate", "space \(spaceID) failed: \(error)")
-        }
+        // Empty space — see activateSpace(id:) for the MRU stamping rationale.
+        activateSpace(id: spaceID)
         return
       }
     case .spaces, .settings, nil:
@@ -1253,6 +1258,27 @@ public final class SwitcherViewModel: ObservableObject {
     } catch {
       Diagnostics.log("activate", "window \(windowID) failed: \(error)")
     }
+  }
+
+  /// Activates a Space and stamps it into the space MRU history. Focus-based
+  /// inference in refresh() cannot see a switch to an empty Space — there is
+  /// no window to move keyboard focus to its display — so every programmatic
+  /// switch (panel header activation, the create-space flow) must route
+  /// through here for the panel's recency ordering to hold. The stamp happens
+  /// regardless of whether the underlying switch succeeds, matching the
+  /// optimistic ordering activateSelected applies for windows.
+  public func activateSpace(id spaceID: UInt64) {
+    stampSpaceMRU(spaceID)
+    do {
+      try spaceManager.activateSpace(id: spaceID)
+    } catch {
+      Diagnostics.log("activate", "space \(spaceID) failed: \(error)")
+    }
+  }
+
+  private func stampSpaceMRU(_ spaceID: UInt64) {
+    spaceMRUHistory.removeAll { $0 == spaceID }
+    spaceMRUHistory.insert(spaceID, at: 0)
   }
 
   /// Warps the cursor onto the activated window when the cursor-warp setting
@@ -1626,8 +1652,7 @@ public final class SwitcherViewModel: ObservableObject {
       // Control tile press), which focus inference in refresh() may never
       // see — an activated space needn't take keyboard focus. Stamp the MRU
       // here so the next panel open shows the moved space as most recent.
-      spaceMRUHistory.removeAll { $0 == spaceID }
-      spaceMRUHistory.insert(spaceID, at: 0)
+      stampSpaceMRU(spaceID)
       pendingMoveStamp = (spaceID, originDisplayUUID)
     }
     let warpAfterMove = activateAfterMove && warpCursorOnActivation

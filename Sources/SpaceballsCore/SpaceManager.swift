@@ -456,6 +456,10 @@ public class SpaceManager {
       throw SpaceSwitchError.notDesktopSpace(spaceID: spaceID)
     }
 
+    // Already the active Space on its display — switching would only flash
+    // Mission Control (the empty-space path) for a no-op.
+    guard !targetSpace.isCurrent else { return }
+
     guard Self.ensureAccessibilityTrusted() else {
       throw SpaceSwitchError.accessibilityNotTrusted
     }

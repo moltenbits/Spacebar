@@ -138,6 +138,35 @@ struct EmptySpaceMRUTests {
     #expect(vm.sections.first?.id == 1)
     #expect(vm.sections[1].id == 4)
   }
+
+  @Test("Programmatic activation (create-space flow) promotes the new space")
+  func programmaticActivationPromotesNewSpace() {
+    let ds = makeEmptySpaceScenario()
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    vm.overrideDisplayUUID = "display-1"
+    vm.refresh()
+    #expect(vm.sections.last?.id == 4)
+
+    // The create-space completion switches to the fresh empty space with no
+    // selection involved. Focus inference can't see the switch (no window to
+    // take keyboard focus), and the stamp must not depend on the manager
+    // call succeeding (it can't in this environment).
+    vm.activateSpace(id: 4)
+
+    // CGS reflects the switch: display-2's current space becomes 4.
+    ds.displaySpaces = [
+      display(
+        uuid: "display-1",
+        spaces: [space(id: 1, uuid: "uuid-1"), space(id: 2, uuid: "uuid-2")],
+        current: 1),
+      display(
+        uuid: "display-2",
+        spaces: [space(id: 3, uuid: "uuid-3"), space(id: 4, uuid: "uuid-4")],
+        current: 4),
+    ]
+    vm.refresh()
+    #expect(vm.sections.first?.id == 4)
+  }
 }
 
 @Suite("Space Move MRU Promotion")
