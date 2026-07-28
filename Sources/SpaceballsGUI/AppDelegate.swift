@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// firing mid-eject.
   private var spaceEvacuationInFlight = false
   private var pendingRestoreWork: DispatchWorkItem?
+  private var restoreFailedAttempts = 0
+  private let restoreRetryPolicy = RestoreRetryPolicy()
   private var permissionsCoordinator: PermissionsCoordinator!
   private var permissionsGrantTimer: Timer?
 
@@ -953,14 +955,30 @@ extension AppDelegate: KeyInterceptorDelegate {
   /// 2 seconds after the last event — and only for ARMED records whose
   /// display is actually back.
   private func scheduleEjectionRestore() {
+    // A real display event starts a fresh retry budget; retries themselves
+    // reschedule via scheduleRestoreCheck without touching the counter.
+    restoreFailedAttempts = 0
+    scheduleRestoreCheck(after: 2.0)
+  }
+
+  private func scheduleRestoreCheck(after delay: TimeInterval) {
     pendingRestoreWork?.cancel()
     let work = DispatchWorkItem { [weak self] in self?.restoreEjectedSpacesIfReady() }
     pendingRestoreWork = work
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
   }
 
   private func restoreEjectedSpacesIfReady() {
-    guard !spaceEvacuationInFlight else { return }
+    // An eject or restore is mid-flight — defer rather than drop, or a
+    // reconfiguration landing during a ~12s restore run would be swallowed
+    // and its Spaces left stranded until the next reconnect. (A post-eject
+    // deferral is harmless: freshly ejected records aren't armed yet, so the
+    // deferred check no-ops.)
+    if spaceEvacuationInFlight {
+      Diagnostics.log("eject", "restore check deferred — evacuation in flight")
+      scheduleRestoreCheck(after: 2.0)
+      return
+    }
     let armed = ejectStore.armedEjections()
     let pending = ejectStore.pendingEjections().filter { armed.contains($0.key) }
     guard !pending.isEmpty else { return }
@@ -973,6 +991,40 @@ extension AppDelegate: KeyInterceptorDelegate {
     if !hasMoves && plan.stale.isEmpty && plan.completed.isEmpty { return }
 
     runSpaceRestore(onlyArmed: true, showHUD: hasMoves)
+  }
+
+  /// After an automatic restore run, retries with backoff when armed records
+  /// that could move remain — a run right after reconnect can fail wholesale
+  /// while Mission Control's AX hierarchy is still rebuilding, and without a
+  /// retry those Spaces sit unrestored until the next display event.
+  private func scheduleRetryIfIncomplete() {
+    let armed = ejectStore.armedEjections()
+    let pending = ejectStore.pendingEjections().filter { armed.contains($0.key) }
+    guard !pending.isEmpty else {
+      restoreFailedAttempts = 0
+      return
+    }
+    let plan = RestorePlanner.plan(
+      spaces: viewModel.spaceManager.getAllSpaces(), pending: pending)
+    guard !plan.moves.isEmpty else {
+      // Only waiting-for-display records remain — a retry can't help them.
+      restoreFailedAttempts = 0
+      return
+    }
+    restoreFailedAttempts += 1
+    guard let delay = restoreRetryPolicy.retryDelay(afterFailedAttempts: restoreFailedAttempts)
+    else {
+      Diagnostics.log(
+        "eject",
+        "auto-restore gave up after \(restoreFailedAttempts) attempts — "
+          + "\(plan.moves.count) move(s) still pending until the next display event")
+      return
+    }
+    Diagnostics.log(
+      "eject",
+      "auto-restore incomplete (\(plan.moves.count) move(s) remain) — "
+        + "retry #\(restoreFailedAttempts) in \(delay)s")
+    scheduleRestoreCheck(after: delay)
   }
 
   /// Shared restore runner for the auto path (armed records only) and the
@@ -1005,6 +1057,7 @@ extension AppDelegate: KeyInterceptorDelegate {
         self.spaceEvacuationInFlight = false
         self.keyInterceptor.setRestoring(false)
         self.mouseBlocker.unblock()
+        if onlyArmed { self.scheduleRetryIfIncomplete() }
         guard showHUD else { return }
         switch result {
         case .success(let summary) where !summary.restored.isEmpty:
