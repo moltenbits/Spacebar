@@ -1417,6 +1417,37 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   private func moveMarkedWindowToAdjacentSpace(forward: Bool, windowID: Int) {
+    // Mode 3 with an arrangement: stepping past the window's display boundary
+    // crosses to the physically adjacent display (wrapping past the far
+    // edge), mirroring moveToNextSpace/moveToPreviousSpace — the flat scan
+    // below would land on whichever group displayOrder puts next, which
+    // needn't be the display below/above. With no display on the vertical
+    // axis, the step wraps within the display's own spaces.
+    if !displayOrder.isEmpty, let arrangement = displayArrangement,
+      let currentSection = filteredSections.first(where: {
+        $0.windows.contains(where: { $0.id == windowID })
+      })
+    {
+      let displaySections = filteredSections.filter {
+        $0.displayUUID == currentSection.displayUUID
+      }
+      let boundary = forward ? displaySections.last : displaySections.first
+      if boundary?.id == currentSection.id {
+        let targetUUID =
+          arrangement.wrappedNeighborUUID(
+            of: currentSection.displayUUID, direction: forward ? .down : .up)
+          ?? currentSection.displayUUID
+        let targetSections = filteredSections.filter { $0.displayUUID == targetUUID }
+        guard let target = forward ? targetSections.first : targetSections.last,
+          target.id != currentSection.id,
+          let sourceIdx = sections.firstIndex(where: { $0.id == currentSection.id }),
+          let targetIdx = sections.firstIndex(where: { $0.id == target.id })
+        else { return }
+        moveMarkedWindowRow(windowID: windowID, from: sourceIdx, to: targetIdx)
+        return
+      }
+    }
+
     // Use the same navigation as moveToNextSpace/moveToPreviousSpace:
     // scan through flatSelectableItems to find the next/previous space,
     // then move the window row to that space in sections.
