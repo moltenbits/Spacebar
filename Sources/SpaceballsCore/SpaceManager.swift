@@ -952,9 +952,17 @@ public class SpaceManager {
   /// - Parameters:
   ///   - spaceIndex: 0-based ordinal position of the space on its display
   ///   - screenNumber: `CGDirectDisplayID` for the target display
+  /// Error reporting for the Mission Control simulation flows: stdout for CLI
+  /// users, the diagnostics log for the GUI — whose stdout goes nowhere, which
+  /// previously made a failed automatic restore undiagnosable after the fact.
+  private static func reportMCFailure(_ message: String) {
+    print(message)
+    Diagnostics.log("mc", message)
+  }
+
   public func switchToSpace(spaceIndex: Int, screenNumber: CGDirectDisplayID) {
     guard AXIsProcessTrusted() else {
-      print("switchToSpace: Accessibility not trusted")
+      Self.reportMCFailure("switchToSpace: Accessibility not trusted")
       return
     }
 
@@ -963,7 +971,7 @@ public class SpaceManager {
         withBundleIdentifier: "com.apple.dock"
       ).first
     else {
-      print("switchToSpace: Dock not running")
+      Self.reportMCFailure("switchToSpace: Dock not running")
       return
     }
 
@@ -986,7 +994,7 @@ public class SpaceManager {
       }()
 
       guard let mcGroup else {
-        print("switchToSpace: Mission Control AX group not found")
+        Self.reportMCFailure("switchToSpace: Mission Control AX group not found")
         return
       }
 
@@ -996,24 +1004,24 @@ public class SpaceManager {
 
       // Navigate: mc → mc.display (matching target display) → mc.spaces → mc.spaces.list
       guard let mcDisplay = Self.axChildMatchingDisplay(mcGroup, screenNumber: screenNumber) else {
-        print("switchToSpace: mc.display not found for display \(screenNumber)")
+        Self.reportMCFailure("switchToSpace: mc.display not found for display \(screenNumber)")
         return
       }
 
       guard let mcSpaces = Self.axChildWithIdentifier(mcDisplay, identifier: "mc.spaces") else {
-        print("switchToSpace: mc.spaces not found")
+        Self.reportMCFailure("switchToSpace: mc.spaces not found")
         return
       }
 
       guard let mcSpacesList = Self.axChildWithIdentifier(mcSpaces, identifier: "mc.spaces.list")
       else {
-        print("switchToSpace: mc.spaces.list not found")
+        Self.reportMCFailure("switchToSpace: mc.spaces.list not found")
         return
       }
 
       let children = Self.axChildren(mcSpacesList)
       guard spaceIndex >= 0 && spaceIndex < children.count else {
-        print(
+        Self.reportMCFailure(
           "switchToSpace: space index \(spaceIndex) out of range (have \(children.count) spaces)")
         return
       }
@@ -2363,7 +2371,7 @@ public class SpaceManager {
   ) -> [Int] {
     guard !drags.isEmpty else { return [] }
     guard AXIsProcessTrusted() else {
-      print("moveSpacesInMCBatch: Accessibility not trusted")
+      Self.reportMCFailure("moveSpacesInMCBatch: Accessibility not trusted")
       return []
     }
 
@@ -2379,7 +2387,7 @@ public class SpaceManager {
           withBundleIdentifier: "com.apple.dock"
         ).first
       else {
-        print("moveSpacesInMCBatch: Dock not running")
+        Self.reportMCFailure("moveSpacesInMCBatch: Dock not running")
         return
       }
 
@@ -2405,7 +2413,7 @@ public class SpaceManager {
       }()
 
       guard let mcGroup else {
-        print("moveSpacesInMCBatch: Mission Control not found")
+        Self.reportMCFailure("moveSpacesInMCBatch: Mission Control not found")
         return
       }
 
@@ -2419,7 +2427,7 @@ public class SpaceManager {
       // other bar to drop onto (single display, mirroring, or "Displays have
       // separate Spaces" disabled).
       guard allDisplays.count >= 2 else {
-        print("moveSpacesInMCBatch: need at least two displays in Mission Control")
+        Self.reportMCFailure("moveSpacesInMCBatch: need at least two displays in Mission Control")
         Self.dismissMissionControlIfPresent(dockElement: dockElement)
         return
       }
@@ -2445,7 +2453,7 @@ public class SpaceManager {
           let targetDisplay = displayMatching(drag.targetScreenNumber),
           let targetBar = spacesBar(of: targetDisplay)
         else {
-          print("moveSpacesInMCBatch: displays for drag \(dragIndex) not found")
+          Self.reportMCFailure("moveSpacesInMCBatch: displays for drag \(dragIndex) not found")
           continue
         }
         let sourceIndex: Int? =
@@ -2498,7 +2506,7 @@ public class SpaceManager {
       let spaceTileTitle = Self.axStringAttribute(
         tiles[sourceSpaceIndex], name: "AXTitle")
     else {
-      print(
+      Self.reportMCFailure(
         "moveSpaceInMC: tile index \(sourceSpaceIndex) out of range (have \(tiles.count) desktop tiles)"
       )
       return false
@@ -2513,7 +2521,7 @@ public class SpaceManager {
     // Hover the source bar so it expands, then wait for the tile's frame to
     // settle — collapsed-bar frames are stale the moment expansion starts.
     guard let barCenter = Self.axCenter(sourceBar) else {
-      print("moveSpaceInMC: source bar frame unreadable")
+      Self.reportMCFailure("moveSpaceInMC: source bar frame unreadable")
       return false
     }
     Self.postMouseMove(at: barCenter)
@@ -2521,7 +2529,7 @@ public class SpaceManager {
       let grab = Self.awaitStablePoint(
         read: readTileCenter, delay: { Thread.sleep(forTimeInterval: 0.04) })
     else {
-      print("moveSpaceInMC: tile \"\(spaceTileTitle)\" not found in source bar")
+      Self.reportMCFailure("moveSpaceInMC: tile \"\(spaceTileTitle)\" not found in source bar")
       return false
     }
 
@@ -2561,7 +2569,7 @@ public class SpaceManager {
       }
     )
     guard let arrival else {
-      print("moveSpaceInMC: destination bar unreadable during drag")
+      Self.reportMCFailure("moveSpaceInMC: destination bar unreadable during drag")
       Self.postMouseUp(at: nudge)
       return false
     }
