@@ -59,6 +59,7 @@ public enum SelectedItem: Equatable, Hashable {
   case windowRow(Int)  // CGWindowID
   case spaces
   case settings
+  case eject
 }
 
 // MARK: - ViewModel
@@ -217,7 +218,7 @@ public final class SwitcherViewModel: ObservableObject {
   private var settingsDisplayIndex: Int = 0
 
   /// The display UUID the user is currently navigating in Mode 3.
-  /// Used so .spaces/.settings only highlight on the relevant panel.
+  /// Used so the meta rows only highlight on the relevant panel.
   @Published public var navigationDisplayUUID: String?
 
   /// Display of the most-recently-used space as of the last refresh,
@@ -586,6 +587,7 @@ public final class SwitcherViewModel: ObservableObject {
     }
     items.append(.spaces)
     items.append(.settings)
+    items.append(.eject)
     return items
   }
 
@@ -607,7 +609,7 @@ public final class SwitcherViewModel: ObservableObject {
 
   // MARK: - Selection
 
-  /// Display group boundary indices within `flatSelectableItems` (excluding the trailing `.settings`).
+  /// Display group boundary indices within `flatSelectableItems` (excluding the trailing meta rows).
   /// Returns (startIndex, endIndex, displayUUID) triples, one per display in `displayOrder`.
   private func displayGroupRanges() -> [(start: Int, end: Int, uuid: String)] {
     guard !displayOrder.isEmpty else { return [] }
@@ -630,7 +632,7 @@ public final class SwitcherViewModel: ObservableObject {
     let items = flatSelectableItems
     guard items.count > 1 else { return }
 
-    // Mode 3: .spaces and .settings act as stops between display groups
+    // Mode 3: the meta rows act as stops between display groups
     if !displayOrder.isEmpty {
       let ranges = displayGroupRanges()
       guard !ranges.isEmpty else { return }
@@ -641,7 +643,12 @@ public final class SwitcherViewModel: ObservableObject {
       }
 
       if selectedItem == .settings {
-        // From .settings, continue to the next display's first item (wrapping)
+        selectedItem = .eject
+        return
+      }
+
+      if selectedItem == .eject {
+        // From .eject, continue to the next display's first item (wrapping)
         let nextGroup = (settingsDisplayIndex + 1) % ranges.count
         selectedItem = items[ranges[nextGroup].start]
         return
@@ -686,10 +693,15 @@ public final class SwitcherViewModel: ObservableObject {
     let items = flatSelectableItems
     guard items.count > 1 else { return }
 
-    // Mode 3: .spaces and .settings act as stops between display groups
+    // Mode 3: the meta rows act as stops between display groups
     if !displayOrder.isEmpty {
       let ranges = displayGroupRanges()
       guard !ranges.isEmpty else { return }
+
+      if selectedItem == .eject {
+        selectedItem = .settings
+        return
+      }
 
       if selectedItem == .settings {
         selectedItem = .spaces
@@ -708,13 +720,13 @@ public final class SwitcherViewModel: ObservableObject {
       }
 
       // At start of a display group → back into the previous group
-      // (wrapping): through .settings when that group's panel hosts the
+      // (wrapping): through .eject when that group's panel hosts the
       // meta rows, else straight onto its last item.
       if let groupIdx = ranges.firstIndex(where: { $0.start == idx }) {
         let prevGroup = (groupIdx - 1 + ranges.count) % ranges.count
         if metaRowsDisplayUUID == nil || ranges[prevGroup].uuid == metaRowsDisplayUUID {
           settingsDisplayIndex = prevGroup
-          selectedItem = .settings
+          selectedItem = .eject
         } else {
           selectedItem = items[ranges[prevGroup].end]
         }
@@ -786,6 +798,7 @@ public final class SwitcherViewModel: ObservableObject {
     case .windowRow(let id): return map[id]
     case .spaces: return nil
     case .settings: return nil
+    case .eject: return nil
     }
   }
 
@@ -817,7 +830,7 @@ public final class SwitcherViewModel: ObservableObject {
     return nil
   }
 
-  /// Records the display group containing `position` so .spaces/.settings
+  /// Records the display group containing `position` so meta-row
   /// selection knows which group the user came from (highlight context and
   /// the ↑-from-Spaces return path).
   private func rememberSettingsGroup(containing position: Int) {
@@ -839,14 +852,18 @@ public final class SwitcherViewModel: ObservableObject {
       return
     }
 
-    // Explicit handling for .spaces and .settings
+    // Explicit handling for the meta rows
     if case .spaces = current {
       selectedItem = .settings
       return
     }
     if case .settings = current {
+      selectedItem = .eject
+      return
+    }
+    if case .eject = current {
       if !displayOrder.isEmpty {
-        // Meta display set: ↓ off Settings continues the vertical crossing
+        // Meta display set: ↓ off Eject continues the vertical crossing
         // from the meta display's bottom (wrapping past the far edge).
         if let metaDisplay = metaRowsDisplayUUID,
           let landing = verticalNeighborLanding(from: metaDisplay, direction: .down)
@@ -882,8 +899,8 @@ public final class SwitcherViewModel: ObservableObject {
       filteredSections.last(where: { $0.displayUUID == currentSection.displayUUID })?.id
         == currentSpace
     {
-      // The meta display's panel ends with the Spaces and Settings rows —
-      // ↓ visits them before crossing off the display.
+      // The meta display's panel ends with the Spaces, Settings, and Eject
+      // rows — ↓ visits them before crossing off the display.
       if currentSection.displayUUID == metaRowsDisplayUUID {
         rememberSettingsGroup(containing: currentPos)
         selectedItem = .spaces
@@ -906,7 +923,7 @@ public final class SwitcherViewModel: ObservableObject {
       groupEnd = nil
     }
 
-    // Scan forward for the first item in a different section, or .spaces/.settings
+    // Scan forward for the first item in a different section, or a meta row
     for offset in 1..<items.count {
       let pos = (currentPos + offset) % items.count
       let item = items[pos]
@@ -915,6 +932,10 @@ public final class SwitcherViewModel: ObservableObject {
         return
       }
       if case .spaces = item {
+        selectedItem = item
+        return
+      }
+      if case .eject = item {
         selectedItem = item
         return
       }
@@ -949,7 +970,11 @@ public final class SwitcherViewModel: ObservableObject {
       return
     }
 
-    // Settings → Spaces → last section
+    // Eject → Settings → Spaces → last section
+    if case .eject = current {
+      selectedItem = .settings
+      return
+    }
     if case .settings = current {
       selectedItem = .spaces
       return
@@ -991,21 +1016,21 @@ public final class SwitcherViewModel: ObservableObject {
         from: currentSection.displayUUID, direction: .up)
       {
         // Entering the meta display from below lands on its bottom-most
-        // rows first: Settings, then Spaces, then its last space.
+        // rows first: Eject, then Settings, then Spaces, then its last space.
         if landing.displayUUID == metaRowsDisplayUUID {
           if let pos = items.firstIndex(of: landing.item) {
             rememberSettingsGroup(containing: pos)
           }
-          selectedItem = .settings
+          selectedItem = .eject
         } else {
           selectedItem = landing.item
         }
       } else if currentSection.displayUUID == metaRowsDisplayUUID {
         // Nothing above (single display, or no vertical axis): the meta
         // display's carousel wraps through its own bottom rows — mirrors
-        // ↓'s fallback, which wraps from Settings to the first space.
+        // ↓'s fallback, which wraps from Eject to the first space.
         rememberSettingsGroup(containing: currentPos)
-        selectedItem = .settings
+        selectedItem = .eject
       }
       return
     }
@@ -1019,16 +1044,24 @@ public final class SwitcherViewModel: ObservableObject {
       groupStart = nil
     }
 
-    // Scan backward for the first item in a different section or .spaces/.settings
+    // Scan backward for the first item in a different section or a meta row
     var targetSpace: UInt64?
     var targetPos: Int?
     for offset in 1..<items.count {
       let pos = (currentPos - offset + items.count) % items.count
       let item = items[pos]
 
-      // Wrap-around: hitting the trailing .settings/.spaces stops means we wrapped
+      // Wrap-around: hitting the trailing meta-row stops means we wrapped
       // past the start of items. Associate with the LAST display group so the highlight
       // appears on the correct panel.
+      if case .eject = item, targetSpace == nil {
+        if !displayOrder.isEmpty {
+          let ranges = displayGroupRanges()
+          if !ranges.isEmpty { settingsDisplayIndex = ranges.count - 1 }
+        }
+        selectedItem = item
+        return
+      }
       if case .settings = item, targetSpace == nil {
         if !displayOrder.isEmpty {
           let ranges = displayGroupRanges()
@@ -1045,10 +1078,11 @@ public final class SwitcherViewModel: ObservableObject {
         selectedItem = item
         return
       }
+      if case .eject = item { break }
       if case .settings = item { break }
       if case .spaces = item { break }
 
-      // In Mode 3, if we've crossed the group boundary going backward, stop at .settings
+      // In Mode 3, if we've crossed the group boundary going backward, stop at .eject
       // of the PREVIOUS display group (mirrors moveToNextSpace which stops at .spaces of
       // the current group when crossing forward).
       if let start = groupStart, pos < start, targetSpace == nil {
@@ -1056,7 +1090,7 @@ public final class SwitcherViewModel: ObservableObject {
         if let prevGroupIdx = ranges.firstIndex(where: { pos >= $0.start && pos <= $0.end }) {
           settingsDisplayIndex = prevGroupIdx
         }
-        selectedItem = .settings
+        selectedItem = .eject
         return
       }
       let itemSpace = spaceID(for: item, using: map)
@@ -1110,7 +1144,7 @@ public final class SwitcherViewModel: ObservableObject {
   /// Returns the display UUID of the section containing the currently selected item.
   public var activeDisplayUUID: String? {
     switch selectedItem {
-    case .spaces, .settings, nil:
+    case .spaces, .settings, .eject, nil:
       return nil
     default:
       return panelDisplayUUID(for: selectedItem)
@@ -1128,7 +1162,7 @@ public final class SwitcherViewModel: ObservableObject {
     case .windowRow(let windowID):
       return filteredSections.first(where: { $0.windows.contains(where: { $0.id == windowID }) })?
         .displayUUID
-    case .spaces, .settings:
+    case .spaces, .settings, .eject:
       return metaRowsDisplayUUID
     case nil:
       return nil
@@ -1136,10 +1170,10 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   /// Returns the display UUID the user was navigating when they reached
-  /// .spaces or .settings. Falls back to activeDisplayUUID for normal items.
+  /// a meta row. Falls back to activeDisplayUUID for normal items.
   public var contextDisplayUUID: String? {
     if let uuid = activeDisplayUUID { return uuid }
-    // When on .spaces or .settings, use the display group we came from
+    // When on a meta row, use the display group we came from
     guard !displayOrder.isEmpty else {
       // Mode 1/2: use the first section's display (or focused display)
       return filteredSections.first?.displayUUID
@@ -1247,7 +1281,7 @@ public final class SwitcherViewModel: ObservableObject {
         activateSpace(id: spaceID)
         return
       }
-    case .spaces, .settings, nil:
+    case .spaces, .settings, .eject, nil:
       return
     }
 
@@ -1466,9 +1500,10 @@ public final class SwitcherViewModel: ObservableObject {
     for i in 1..<items.count {
       let pos = (currentPos + i * step + items.count) % items.count
       let item = items[pos]
-      // Skip .spaces and .settings — wrap through them
+      // Skip the meta rows — wrap through them
       if case .spaces = item { continue }
       if case .settings = item { continue }
+      if case .eject = item { continue }
       let itemSpace = spaceID(for: item, using: map)
       if let itemSpace, itemSpace != currentSpaceID {
         targetSpaceID = itemSpace

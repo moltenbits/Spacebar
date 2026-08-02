@@ -85,6 +85,7 @@ struct PanelDisplayUUIDTests {
     let vm = makeViewModel()
     #expect(vm.panelDisplayUUID(for: .spaces) == "display-a")
     #expect(vm.panelDisplayUUID(for: .settings) == "display-a")
+    #expect(vm.panelDisplayUUID(for: .eject) == "display-a")
   }
 
   @Test("Meta rows map to nil when no meta-rows display is set (modes 1/2)")
@@ -93,6 +94,7 @@ struct PanelDisplayUUIDTests {
     vm.metaRowsDisplayUUID = nil
     #expect(vm.panelDisplayUUID(for: .spaces) == nil)
     #expect(vm.panelDisplayUUID(for: .settings) == nil)
+    #expect(vm.panelDisplayUUID(for: .eject) == nil)
   }
 
   @Test("Nil and stale selections map to nil")
