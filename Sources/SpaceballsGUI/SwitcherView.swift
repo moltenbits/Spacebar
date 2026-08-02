@@ -29,11 +29,12 @@ struct SwitcherView: View {
     case .spaceHeader(let id): AnyHashable("header-\(id)")
     case .spaces: AnyHashable("spaces")
     case .settings: AnyHashable("settings")
+    case .eject: AnyHashable("eject")
     case nil: nil
     }
   }
 
-  /// Whether THIS panel shows the Spaces/Settings rows. When the view model
+  /// Whether THIS panel shows the meta rows. When the view model
   /// restricts them to one display's panel (mode 3), only that panel renders
   /// them; single-panel modes always do.
   private var showsMetaRows: Bool {
@@ -58,6 +59,7 @@ struct SwitcherView: View {
     if showsMetaRows {
       items.append(.spaces)
       items.append(.settings)
+      items.append(.eject)
     }
     return items
   }
@@ -164,6 +166,7 @@ struct SwitcherView: View {
             if showsMetaRows {
               spacesRow
               settingsRow
+              ejectRow
             }
           }
           .padding(.top, contentOverflows ? 20 : 6)
@@ -318,7 +321,7 @@ struct SwitcherView: View {
 
   // MARK: - Settings Row
 
-  /// Whether this panel should show the highlight for .spaces/.settings
+  /// Whether this panel should show the highlight for the meta rows
   private var isGlobalRowSelectedOnThisPanel: Bool {
     guard let uuid = displayUUID else { return true }  // single panel, always show
     // Restricted meta rows render on exactly one panel — highlight there.
@@ -390,6 +393,39 @@ struct SwitcherView: View {
       )
     }
     .id("settings")
+    .contentShape(Rectangle())
+  }
+
+  private var ejectRow: some View {
+    let iconSize = CGFloat(round(appSettings.textSize * 14.0 / 13.0))
+    let iconFrame = appSettings.iconSize
+    let isSelected = viewModel.selectedItem == .eject && isGlobalRowSelectedOnThisPanel
+    return VStack(spacing: 0) {
+      Spacer().frame(height: 6)
+      HStack(spacing: 8) {
+        Text("")
+          .frame(width: spaceLabelWidth, alignment: .leading)
+        Text("")
+          .frame(width: 110, alignment: .trailing)
+        Image(systemName: "eject")
+          .resizable()
+          .frame(width: iconSize, height: iconSize)
+          .frame(width: iconFrame, height: iconFrame)
+          .foregroundStyle(isSelected ? .white : .secondary)
+        Text("Eject")
+          .font(.system(size: CGFloat(appSettings.textSize)))
+          .foregroundStyle(isSelected ? .white : .secondary)
+      }
+      .padding(.vertical, 1)
+      .padding(.horizontal, 10)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(
+        isSelected
+          ? RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.8))
+          : nil
+      )
+    }
+    .id("eject")
     .contentShape(Rectangle())
   }
 

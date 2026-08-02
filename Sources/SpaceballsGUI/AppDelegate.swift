@@ -786,6 +786,8 @@ extension AppDelegate: KeyInterceptorDelegate {
       resizePanelsToFit()
     case .settings:
       openSettings()
+    case .eject:
+      keyInterceptorEjectSpaces()
     case .spaceHeader, .windowRow:
       activateAndDismiss()
     case nil:

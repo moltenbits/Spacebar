@@ -537,7 +537,7 @@ struct SearchFilteringTests {
 struct SelectionNavigationTests {
 
   // Tab-cycle order for makeTwoSpaceDataSource():
-  // [10] → [11] → [20] → [Settings]
+  // [10] → [11] → [20] → [Spaces] → [Settings] → [Eject]
   // Space headers are no longer separate selectable items for non-empty sections.
 
   @Test("moveSelectionDown selects first window row when nothing selected")
@@ -571,9 +571,12 @@ struct SelectionNavigationTests {
 
     vm.moveSelectionDown()
     #expect(vm.selectedItem == .settings)
+
+    vm.moveSelectionDown()
+    #expect(vm.selectedItem == .eject)
   }
 
-  @Test("moveSelectionDown past last row selects settings")
+  @Test("moveSelectionDown past last row selects meta rows in order")
   func moveDownToSettings() {
     let ds = makeTwoSpaceDataSource()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
@@ -585,20 +588,23 @@ struct SelectionNavigationTests {
 
     vm.moveSelectionDown()
     #expect(vm.selectedItem == .settings)
+
+    vm.moveSelectionDown()
+    #expect(vm.selectedItem == .eject)
   }
 
-  @Test("moveSelectionDown from settings wraps to first window row")
-  func moveDownFromSettings() {
+  @Test("moveSelectionDown from eject wraps to first window row")
+  func moveDownFromEject() {
     let ds = makeTwoSpaceDataSource()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
-    vm.selectedItem = .settings
+    vm.selectedItem = .eject
     vm.moveSelectionDown()
     #expect(vm.selectedItem == .windowRow(10))  // wraps to first window
   }
 
-  @Test("moveSelectionUp selects settings when nothing selected")
+  @Test("moveSelectionUp selects eject when nothing selected")
   func moveUpFromNone() {
     let ds = makeTwoSpaceDataSource()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
@@ -607,11 +613,11 @@ struct SelectionNavigationTests {
     vm.selectedItem = nil
     vm.moveSelectionUp()
 
-    // Last selectable item is settings
-    #expect(vm.selectedItem == .settings)
+    // Last selectable item is eject
+    #expect(vm.selectedItem == .eject)
   }
 
-  @Test("moveSelectionUp from first window row wraps to settings")
+  @Test("moveSelectionUp from first window row wraps to eject")
   func moveUpFromFirstRow() {
     let ds = makeTwoSpaceDataSource()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
@@ -619,16 +625,19 @@ struct SelectionNavigationTests {
 
     vm.selectedItem = .windowRow(10)  // first item
     vm.moveSelectionUp()
-    #expect(vm.selectedItem == .settings)  // wraps to last item
+    #expect(vm.selectedItem == .eject)  // wraps to last item
   }
 
-  @Test("moveSelectionUp from settings goes to last row")
+  @Test("moveSelectionUp from eject steps back through meta rows to last row")
   func moveUpFromSettings() {
     let ds = makeTwoSpaceDataSource()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
-    vm.selectedItem = .settings
+    vm.selectedItem = .eject
+    vm.moveSelectionUp()
+    #expect(vm.selectedItem == .settings)
+
     vm.moveSelectionUp()
     #expect(vm.selectedItem == .spaces)
 
@@ -726,10 +735,13 @@ struct SelectionNavigationTests {
     #expect(vm.selectedItem == .settings)
 
     vm.moveSelectionDown()
+    #expect(vm.selectedItem == .eject)
+
+    vm.moveSelectionDown()
     #expect(vm.selectedItem == .windowRow(10))  // wraps back to first window
   }
 
-  @Test("Selection on empty results navigates spaces and settings only")
+  @Test("Selection on empty results navigates meta rows only")
   func emptyResultsNavigation() {
     let ds = MockDataSource()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
@@ -739,6 +751,12 @@ struct SelectionNavigationTests {
     #expect(vm.selectedItem == .spaces)
 
     vm.moveSelectionDown()
+    #expect(vm.selectedItem == .settings)
+
+    vm.moveSelectionDown()
+    #expect(vm.selectedItem == .eject)
+
+    vm.moveSelectionUp()
     #expect(vm.selectedItem == .settings)
 
     vm.moveSelectionUp()
@@ -777,10 +795,10 @@ struct SelectionNavigationTests {
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
-    // Expected cycle: 10 → 11 → 20 → spaces → settings → 10
+    // Expected cycle: 10 → 11 → 20 → spaces → settings → eject → 10
     let expected: [SelectedItem] = [
       .windowRow(10), .windowRow(11),
-      .windowRow(20), .spaces, .settings,
+      .windowRow(20), .spaces, .settings, .eject,
     ]
 
     vm.selectedItem = nil
@@ -841,7 +859,7 @@ struct SelectionNavigationTests {
     #expect(vm.selectedItem == .windowRow(10))  // first window in Space 1
   }
 
-  @Test("moveToNextSpace stops on settings then wraps")
+  @Test("moveToNextSpace stops on each meta row then wraps")
   func moveToNextSpaceWraps() {
     let ds = makeTwoSpaceDataSource()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
@@ -855,7 +873,50 @@ struct SelectionNavigationTests {
     #expect(vm.selectedItem == .settings)  // then settings
 
     vm.moveToNextSpace()
+    #expect(vm.selectedItem == .eject)  // then eject
+
+    vm.moveToNextSpace()
     #expect(vm.selectedItem == .windowRow(10))  // then wraps to Space 1
+  }
+
+  @Test("moveToPreviousSpace steps back through the meta rows")
+  func moveToPreviousSpaceThroughMetaRows() {
+    let ds = makeTwoSpaceDataSource()
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    vm.refresh()
+
+    vm.selectedItem = .eject
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .settings)
+
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .spaces)
+
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .windowRow(20))  // last section's first item
+  }
+
+  @Test("moveToPreviousSpace from the first section wraps to eject")
+  func moveToPreviousSpaceWrapsToEject() {
+    let ds = makeTwoSpaceDataSource()
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    vm.refresh()
+
+    vm.selectedItem = .windowRow(10)  // Space 1 (first section)
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .eject)
+  }
+
+  @Test("activateSelected on eject is a no-op in the view model")
+  func activateSelectedOnEjectNoOp() {
+    let ds = makeTwoSpaceDataSource()
+    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    vm.refresh()
+
+    vm.selectedItem = .eject
+    vm.activateSelected()  // eject runs at the app layer; the VM must not act
+
+    #expect(vm.selectedItem == .eject)
   }
 }
 

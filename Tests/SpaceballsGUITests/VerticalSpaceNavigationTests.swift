@@ -162,7 +162,7 @@ struct VerticalSpaceNavigationTests {
     #expect(vm.selectedItem == firstItem(of: lower[lower.count - 1]))
   }
 
-  @Test("Down from the meta display's last space visits Spaces, Settings, then crosses on")
+  @Test("Down from the meta display's last space visits Spaces, Settings, Eject, then crosses on")
   func downThroughMetaRows() {
     let vm = makeViewModel(arranged: true)
     vm.metaRowsDisplayUUID = "display-lower"
@@ -175,10 +175,12 @@ struct VerticalSpaceNavigationTests {
     vm.moveToNextSpace()
     #expect(vm.selectedItem == .settings)
     vm.moveToNextSpace()
+    #expect(vm.selectedItem == .eject)
+    vm.moveToNextSpace()
     #expect(vm.selectedItem == firstItem(of: upper[0]))
   }
 
-  @Test("Up arriving at the meta display lands on Settings, Spaces, then its last space")
+  @Test("Up arriving at the meta display lands on Eject, Settings, Spaces, then its last space")
   func upThroughMetaRows() {
     let vm = makeViewModel(arranged: true)
     vm.metaRowsDisplayUUID = "display-lower"
@@ -186,8 +188,10 @@ struct VerticalSpaceNavigationTests {
     let lower = sections(vm, on: "display-lower")
 
     // Upper display's first space; ↑ wraps down to the meta display, whose
-    // bottom-most rows are Settings then Spaces then its last space.
+    // bottom-most rows are Eject then Settings then Spaces then its last space.
     vm.selectedItem = firstItem(of: upper[0])
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .eject)
     vm.moveToPreviousSpace()
     #expect(vm.selectedItem == .settings)
     vm.moveToPreviousSpace()
@@ -239,7 +243,7 @@ struct VerticalSpaceNavigationTests {
     #expect(vm.selectedItem == firstItem(of: upper[0]))
   }
 
-  @Test("Tab visits Spaces and Settings at the meta group's end, then continues")
+  @Test("Tab visits Spaces, Settings, and Eject at the meta group's end, then continues")
   func tabVisitsMetaRowsAtMetaBoundary() {
     let vm = makeViewModel(arranged: true)
     vm.metaRowsDisplayUUID = "display-lower"
@@ -252,10 +256,12 @@ struct VerticalSpaceNavigationTests {
     vm.moveSelectionDown()
     #expect(vm.selectedItem == .settings)
     vm.moveSelectionDown()
+    #expect(vm.selectedItem == .eject)
+    vm.moveSelectionDown()
     #expect(vm.selectedItem == firstItem(of: upper[0]))
   }
 
-  @Test("Shift-Tab into a preceding meta group enters through Settings")
+  @Test("Shift-Tab into a preceding meta group enters through Eject")
   func shiftTabEntersMetaGroupThroughSettings() {
     let vm = makeViewModel(arranged: true)
     vm.metaRowsDisplayUUID = "display-lower"
@@ -263,8 +269,10 @@ struct VerticalSpaceNavigationTests {
     let lower = sections(vm, on: "display-lower")
 
     // Upper group follows the lower (meta) group: ↑ from its first item
-    // backs into Settings → Spaces → the meta group's last item.
+    // backs into Eject → Settings → Spaces → the meta group's last item.
     vm.selectedItem = firstItem(of: upper[0])
+    vm.moveSelectionUp()
+    #expect(vm.selectedItem == .eject)
     vm.moveSelectionUp()
     #expect(vm.selectedItem == .settings)
     vm.moveSelectionUp()
@@ -294,12 +302,14 @@ struct VerticalSpaceNavigationTests {
     #expect(vm.selectedItem == .spaces)
   }
 
-  @Test("Single display: Up from the first space wraps through Settings and Spaces")
+  @Test("Single display: Up from the first space wraps through Eject, Settings, and Spaces")
   func singleDisplayUpWrapsThroughMetaRows() {
     let vm = makeSingleDisplayViewModel()
     let solo = sections(vm, on: "display-solo")
 
     vm.selectedItem = firstItem(of: solo[0])
+    vm.moveToPreviousSpace()
+    #expect(vm.selectedItem == .eject)
     vm.moveToPreviousSpace()
     #expect(vm.selectedItem == .settings)
     vm.moveToPreviousSpace()
@@ -308,7 +318,7 @@ struct VerticalSpaceNavigationTests {
     #expect(vm.selectedItem == firstItem(of: solo[solo.count - 1]))
   }
 
-  @Test("Single display: Down from the last space wraps through Spaces and Settings")
+  @Test("Single display: Down from the last space wraps through Spaces, Settings, and Eject")
   func singleDisplayDownWrapsThroughMetaRows() {
     let vm = makeSingleDisplayViewModel()
     let solo = sections(vm, on: "display-solo")
@@ -318,6 +328,8 @@ struct VerticalSpaceNavigationTests {
     #expect(vm.selectedItem == .spaces)
     vm.moveToNextSpace()
     #expect(vm.selectedItem == .settings)
+    vm.moveToNextSpace()
+    #expect(vm.selectedItem == .eject)
     vm.moveToNextSpace()
     #expect(vm.selectedItem == firstItem(of: solo[0]))
   }
