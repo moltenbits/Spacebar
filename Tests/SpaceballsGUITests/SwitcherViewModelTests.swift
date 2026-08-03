@@ -745,6 +745,9 @@ struct SelectionNavigationTests {
   func emptyResultsNavigation() {
     let ds = MockDataSource()
     let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    // No spaces at all would hide the Eject row; fail open so all three
+    // meta rows stay navigable regardless of the machine running the test.
+    vm.builtinDisplayUUID = { nil }
     vm.refresh()
 
     vm.moveSelectionDown()
