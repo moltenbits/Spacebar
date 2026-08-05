@@ -214,6 +214,16 @@ public final class SwitcherViewModel: ObservableObject {
   /// Override the focused display UUID (used for display cycling via Cmd+Left/Right and for testing).
   public var overrideDisplayUUID: String?
 
+  /// Resolves the built-in display's UUID for Eject-row gating; overridable
+  /// for tests.
+  public var builtinDisplayUUID: () -> String? = { SpaceManager.builtinDisplayUUID() }
+
+  /// Whether the Eject meta row is offered. False when every Space already
+  /// sits on the built-in display — an eject would have nothing to move.
+  /// Fails open when the built-in display can't be identified. Recomputed
+  /// each refresh (display reconfigurations trigger one).
+  @Published public private(set) var ejectAvailable: Bool = true
+
   /// In mode 3, tracks which display group the user was navigating when .settings was selected.
   private var settingsDisplayIndex: Int = 0
 
@@ -490,6 +500,9 @@ public final class SwitcherViewModel: ObservableObject {
         ))
     }
 
+    let builtin = builtinDisplayUUID()
+    ejectAvailable = builtin.map { b in spaces.contains { $0.displayUUID != b } } ?? true
+
     sections = newSections
     searchText = ""
     selectedItem = nil
@@ -587,8 +600,15 @@ public final class SwitcherViewModel: ObservableObject {
     }
     items.append(.spaces)
     items.append(.settings)
-    items.append(.eject)
+    if ejectAvailable {
+      items.append(.eject)
+    }
     return items
+  }
+
+  /// The bottom-most meta row currently offered.
+  private var bottomMetaRow: SelectedItem {
+    ejectAvailable ? .eject : .settings
   }
 
   // MARK: - Selection Convenience
@@ -642,13 +662,14 @@ public final class SwitcherViewModel: ObservableObject {
         return
       }
 
-      if selectedItem == .settings {
+      if selectedItem == .settings, ejectAvailable {
         selectedItem = .eject
         return
       }
 
-      if selectedItem == .eject {
-        // From .eject, continue to the next display's first item (wrapping)
+      if selectedItem == .settings || selectedItem == .eject {
+        // From the bottom meta row, continue to the next display's first
+        // item (wrapping)
         let nextGroup = (settingsDisplayIndex + 1) % ranges.count
         selectedItem = items[ranges[nextGroup].start]
         return
@@ -720,13 +741,13 @@ public final class SwitcherViewModel: ObservableObject {
       }
 
       // At start of a display group → back into the previous group
-      // (wrapping): through .eject when that group's panel hosts the
-      // meta rows, else straight onto its last item.
+      // (wrapping): through the bottom meta row when that group's panel
+      // hosts the meta rows, else straight onto its last item.
       if let groupIdx = ranges.firstIndex(where: { $0.start == idx }) {
         let prevGroup = (groupIdx - 1 + ranges.count) % ranges.count
         if metaRowsDisplayUUID == nil || ranges[prevGroup].uuid == metaRowsDisplayUUID {
           settingsDisplayIndex = prevGroup
-          selectedItem = .eject
+          selectedItem = bottomMetaRow
         } else {
           selectedItem = items[ranges[prevGroup].end]
         }
@@ -857,11 +878,11 @@ public final class SwitcherViewModel: ObservableObject {
       selectedItem = .settings
       return
     }
-    if case .settings = current {
+    if case .settings = current, ejectAvailable {
       selectedItem = .eject
       return
     }
-    if case .eject = current {
+    if current == .settings || current == .eject {
       if !displayOrder.isEmpty {
         // Meta display set: ↓ off Eject continues the vertical crossing
         // from the meta display's bottom (wrapping past the far edge).
@@ -1016,21 +1037,23 @@ public final class SwitcherViewModel: ObservableObject {
         from: currentSection.displayUUID, direction: .up)
       {
         // Entering the meta display from below lands on its bottom-most
-        // rows first: Eject, then Settings, then Spaces, then its last space.
+        // offered row first: Eject (when shown), then Settings, then
+        // Spaces, then its last space.
         if landing.displayUUID == metaRowsDisplayUUID {
           if let pos = items.firstIndex(of: landing.item) {
             rememberSettingsGroup(containing: pos)
           }
-          selectedItem = .eject
+          selectedItem = bottomMetaRow
         } else {
           selectedItem = landing.item
         }
       } else if currentSection.displayUUID == metaRowsDisplayUUID {
         // Nothing above (single display, or no vertical axis): the meta
         // display's carousel wraps through its own bottom rows — mirrors
-        // ↓'s fallback, which wraps from Eject to the first space.
+        // ↓'s fallback, which wraps from the bottom meta row to the first
+        // space.
         rememberSettingsGroup(containing: currentPos)
-        selectedItem = .eject
+        selectedItem = bottomMetaRow
       }
       return
     }
@@ -1082,15 +1105,15 @@ public final class SwitcherViewModel: ObservableObject {
       if case .settings = item { break }
       if case .spaces = item { break }
 
-      // In Mode 3, if we've crossed the group boundary going backward, stop at .eject
-      // of the PREVIOUS display group (mirrors moveToNextSpace which stops at .spaces of
-      // the current group when crossing forward).
+      // In Mode 3, if we've crossed the group boundary going backward, stop at the
+      // bottom meta row of the PREVIOUS display group (mirrors moveToNextSpace which
+      // stops at .spaces of the current group when crossing forward).
       if let start = groupStart, pos < start, targetSpace == nil {
         let ranges = displayGroupRanges()
         if let prevGroupIdx = ranges.firstIndex(where: { pos >= $0.start && pos <= $0.end }) {
           settingsDisplayIndex = prevGroupIdx
         }
-        selectedItem = .eject
+        selectedItem = bottomMetaRow
         return
       }
       let itemSpace = spaceID(for: item, using: map)

@@ -59,7 +59,9 @@ struct SwitcherView: View {
     if showsMetaRows {
       items.append(.spaces)
       items.append(.settings)
-      items.append(.eject)
+      if viewModel.ejectAvailable {
+        items.append(.eject)
+      }
     }
     return items
   }
@@ -166,7 +168,9 @@ struct SwitcherView: View {
             if showsMetaRows {
               spacesRow
               settingsRow
-              ejectRow
+              if viewModel.ejectAvailable {
+                ejectRow
+              }
             }
           }
           .padding(.top, contentOverflows ? 20 : 6)
