@@ -1,35 +1,39 @@
 import Cocoa
+import Darwin
 import SpaceballsCore
+import SpaceballsGUILib
 
 /// Consumes physical mouse input while Mission Control automation is
-/// posting synthetic drags — a stray user mouse move mid-drag yanks the
-/// tile off course. Spaceballs's own events carry
+/// posting synthetic drags. Spaceballs's own events carry
 /// `SpaceManager.syntheticEventTag` in `eventSourceUserData` and pass
 /// through; untagged (physical) mouse events are swallowed.
 ///
+/// This stays separate from the permanent keyboard tap so ordinary mouse
+/// movement does not enter Spaceballs's callback outside an eject or restore.
+///
 /// Escape hatches, in order of independence:
-/// 1. `unblock()` runs in every eject/restore completion path.
-/// 2. The callback checks a hard deadline on every event — past it, the tap
-///    disarms itself inline even if no completion path ever fired.
+/// 1. `endSpaceTransferMouseBlock()` runs in every transfer completion path.
+/// 2. The callback checks a hard deadline on every event and disarms itself
+///    after expiry, even if no completion path ever fired.
 /// 3. The signal handlers in KeyInterceptor.swift disable the tap on
 ///    SIGTERM/SIGINT/SIGHUP.
-/// 4. The tap is a mach port owned by this process: any process death,
-///    including SIGKILL, releases it and physical input flows again.
+/// 4. The tap is a mach port owned by this process, so process death releases
+///    it and physical input flows again.
 ///
-/// Main-thread only: block/unblock are called on the main queue and the
-/// tap's run-loop source is scheduled on the main run loop, so the callback
-/// and all state mutation share one thread.
-final class MouseInputBlocker {
+/// Main-thread only: begin/end are called on the main queue and the tap's
+/// run-loop source is scheduled on the main run loop, so its callback and all
+/// state mutation share one thread.
+final class MouseInputBlocker: SpaceTransferMouseInputBlocking {
   private var eventTap: CFMachPort?
   private var runLoopSource: CFRunLoopSource?
   fileprivate var deadline = Date.distantPast
 
-  /// Starts swallowing physical mouse input until `unblock()` or `timeout`
-  /// elapses, whichever comes first. Returns false when the tap can't be
-  /// created (Accessibility not granted).
+  /// Starts swallowing physical mouse input until completion or `timeout`,
+  /// whichever comes first. Returns false if Accessibility does not permit a
+  /// suppressing event tap.
   @discardableResult
-  func block(for timeout: TimeInterval) -> Bool {
-    unblock()
+  func beginSpaceTransferMouseBlock(for timeout: TimeInterval) -> Bool {
+    endSpaceTransferMouseBlock()
     deadline = Date().addingTimeInterval(timeout)
 
     let mouseTypes: [CGEventType] = [
@@ -49,7 +53,8 @@ final class MouseInputBlocker {
         userInfo: Unmanaged.passUnretained(self).toOpaque()
       )
     else {
-      print("MouseInputBlocker: failed to create event tap")
+      deadline = .distantPast
+      Diagnostics.log("eject", "physical mouse input block unavailable — event tap creation failed")
       return false
     }
 
@@ -59,10 +64,15 @@ final class MouseInputBlocker {
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
     activeMouseBlockerTap = tap
+    guard CGEvent.tapIsEnabled(tap: tap) else {
+      Diagnostics.log("eject", "physical mouse input block unavailable — event tap stayed disabled")
+      endSpaceTransferMouseBlock()
+      return false
+    }
     return true
   }
 
-  func unblock() {
+  func endSpaceTransferMouseBlock() {
     if let tap = eventTap {
       CGEvent.tapEnable(tap: tap, enable: false)
     }
@@ -80,6 +90,13 @@ final class MouseInputBlocker {
       CGEvent.tapEnable(tap: tap, enable: false)
     }
   }
+
+  fileprivate func reenableFromCallback() {
+    guard SpaceTransferInputPolicy.isBlockActive(now: Date(), deadline: deadline),
+      let tap = eventTap
+    else { return }
+    CGEvent.tapEnable(tap: tap, enable: true)
+  }
 }
 
 private func mouseBlockerCallback(
@@ -91,21 +108,25 @@ private func mouseBlockerCallback(
   guard let userInfo else { return Unmanaged.passUnretained(event) }
   let blocker = Unmanaged<MouseInputBlocker>.fromOpaque(userInfo).takeUnretainedValue()
 
-  // If the system disabled the tap (slow callback), don't fight it.
+  // Apple explicitly permits re-enabling a disabled event tap. Keep the
+  // short-lived transfer guard active if WindowServer disabled it, while the
+  // independent hard deadline still guarantees recovery.
   if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+    blocker.reenableFromCallback()
     return Unmanaged.passUnretained(event)
   }
 
-  // Hard deadline: even if every completion path failed, the block expires.
   if Date() >= blocker.deadline {
     blocker.disableFromCallback()
     return Unmanaged.passUnretained(event)
   }
 
-  // Spaceballs's own synthetic events pass through.
-  if event.getIntegerValueField(.eventSourceUserData) == SpaceManager.syntheticEventTag {
-    return Unmanaged.passUnretained(event)
-  }
-
-  return nil  // consume physical mouse input
+  return SpaceTransferInputPolicy.shouldSuppressMouseEvent(
+    sourceUserData: event.getIntegerValueField(.eventSourceUserData),
+    sourceProcessID: event.getIntegerValueField(.eventSourceUnixProcessID),
+    currentProcessID: Int64(getpid()),
+    now: Date(),
+    deadline: blocker.deadline)
+    ? nil
+    : Unmanaged.passUnretained(event)
 }

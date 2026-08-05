@@ -85,6 +85,14 @@ final class KeyInterceptor {
     restoring = active
   }
 
+  func beginSpaceTransferShortcutBlock() {
+    restoring = true
+  }
+
+  func endSpaceTransferShortcutBlock() {
+    restoring = false
+  }
+
   func setRenameMode(_ active: Bool) {
     renameMode = active
   }
@@ -186,6 +194,8 @@ final class KeyInterceptor {
     }
   }
 }
+
+extension KeyInterceptor: SpaceTransferShortcutBlocking {}
 
 // MARK: - C callback
 

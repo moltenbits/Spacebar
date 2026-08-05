@@ -23,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private let ejectStore = EjectStore()
   private let progressOverlay = ProgressOverlay()
   private let mouseBlocker = MouseInputBlocker()
+  private lazy var spaceTransferShield = SpaceTransferShield(
+    mouseInputBlocker: mouseBlocker,
+    shortcutBlocker: keyInterceptor,
+    overlay: progressOverlay)
   /// One eject/restore MC session at a time; also blocks auto-restore from
   /// firing mid-eject.
   private var spaceEvacuationInFlight = false
@@ -891,22 +895,11 @@ extension AppDelegate: KeyInterceptorDelegate {
     hidePanel()
 
     spaceEvacuationInFlight = true
-    // Block Cmd+Tab and friends during the Mission Control ballet — a panel
-    // opening mid-drag would fight the synthetic mouse events.
-    keyInterceptor.setRestoring(true)
-
-    // Physical mouse input is consumed for the duration — a stray user move
-    // mid-drag yanks the tile off course. Deadline scales with the workload;
-    // the tap also self-expires (see MouseInputBlocker) and every completion
-    // path below unblocks.
     let planned = EjectPlanner.plan(
       spaces: viewModel.spaceManager.getAllSpaces(),
       targetDisplayUUID: SpaceManager.builtinDisplayUUID() ?? "",
       names: spaceNameStore.allCustomNames())
-    mouseBlocker.block(for: 20.0 + 6.0 * Double(planned.moves.count))
-    progressOverlay.show(
-      message: "Ejecting Spaces…",
-      subtitle: "Mouse interaction paused while ejecting…")
+    spaceTransferShield.begin(operation: .eject, plannedMoves: planned.moves.count)
 
     DispatchQueue.global(qos: .userInteractive).async { [weak self] in
       guard let self else { return }
@@ -916,24 +909,23 @@ extension AppDelegate: KeyInterceptorDelegate {
       }
       DispatchQueue.main.async {
         self.spaceEvacuationInFlight = false
-        self.keyInterceptor.setRestoring(false)
-        self.mouseBlocker.unblock()
+        let message: String
         switch result {
         case .success(let summary):
           if summary.ejected.isEmpty && summary.failed.isEmpty {
-            self.progressOverlay.update(message: "Nothing to eject")
+            message = "Nothing to eject"
           } else {
             let count = summary.ejected.count
-            var message = "Ejected \(count) Space\(count == 1 ? "" : "s")"
-            if !summary.failed.isEmpty { message += " (\(summary.failed.count) failed)" }
-            self.progressOverlay.update(message: message)
+            var resultMessage = "Ejected \(count) Space\(count == 1 ? "" : "s")"
+            if !summary.failed.isEmpty {
+              resultMessage += " (\(summary.failed.count) failed)"
+            }
+            message = resultMessage
           }
         case .failure(let error):
-          self.progressOverlay.update(message: "Eject failed: \(error.localizedDescription)")
+          message = "Eject failed: \(error.localizedDescription)"
         }
-        // The result screen's whole lifespan is the fade: it appears and
-        // immediately starts fading, gone after 1.5s.
-        self.progressOverlay.dismiss(fadingOver: 1.5)
+        self.spaceTransferShield.finish(message: message)
       }
     }
   }
@@ -1037,16 +1029,12 @@ extension AppDelegate: KeyInterceptorDelegate {
       .contains { !onlyArmed || armed.contains($0.key) }
     spaceEvacuationInFlight = true
     if showHUD {
-      keyInterceptor.setRestoring(true)
       let plan = RestorePlanner.plan(
         spaces: viewModel.spaceManager.getAllSpaces(),
         pending: ejectStore.pendingEjections().filter {
           !onlyArmed || armed.contains($0.key)
         })
-      mouseBlocker.block(for: 20.0 + 6.0 * Double(plan.moves.count))
-      progressOverlay.show(
-        message: "Restoring Spaces…",
-        subtitle: "Mouse interaction paused while restoring…")
+      spaceTransferShield.begin(operation: .restore, plannedMoves: plan.moves.count)
     }
 
     DispatchQueue.global(qos: .userInteractive).async { [weak self] in
@@ -1057,32 +1045,28 @@ extension AppDelegate: KeyInterceptorDelegate {
       }
       DispatchQueue.main.async {
         self.spaceEvacuationInFlight = false
-        self.keyInterceptor.setRestoring(false)
-        self.mouseBlocker.unblock()
         if onlyArmed { self.scheduleRetryIfIncomplete() }
         guard showHUD else { return }
+        let message: String
         switch result {
         case .success(let summary) where !summary.restored.isEmpty:
           let count = summary.restored.count
-          var message = "Restored \(count) Space\(count == 1 ? "" : "s")"
+          var resultMessage = "Restored \(count) Space\(count == 1 ? "" : "s")"
           if !summary.waiting.isEmpty {
-            message += " (\(summary.waiting.count) awaiting a display)"
+            resultMessage += " (\(summary.waiting.count) awaiting a display)"
           }
-          self.progressOverlay.update(message: message)
+          message = resultMessage
         case .success(let summary) where !summary.waiting.isEmpty:
-          self.progressOverlay.update(
-            message: "\(summary.waiting.count) Space(s) awaiting a disconnected display")
+          message = "\(summary.waiting.count) Space(s) awaiting a disconnected display"
         case .success:
-          self.progressOverlay.update(
-            message: hadPending
-              ? "Space restore incomplete — will retry on reconnect"
-              : "Nothing to restore")
+          message =
+            hadPending
+            ? "Space restore incomplete — will retry on reconnect"
+            : "Nothing to restore"
         case .failure(let error):
-          self.progressOverlay.update(message: "Restore failed: \(error.localizedDescription)")
+          message = "Restore failed: \(error.localizedDescription)"
         }
-        // The result screen's whole lifespan is the fade: it appears and
-        // immediately starts fading, gone after 1.5s.
-        self.progressOverlay.dismiss(fadingOver: 1.5)
+        self.spaceTransferShield.finish(message: message)
       }
     }
   }
