@@ -1607,17 +1607,11 @@ public class SpaceManager {
 
   /// Posts a click (mouseDown + mouseUp) at the given point.
   static func postMouseClick(at point: CGPoint) {
-    if let down = CGEvent(
-      mouseEventSource: nil, mouseType: .leftMouseDown,
-      mouseCursorPosition: point, mouseButton: .left)
-    {
+    if let down = makeSyntheticMouseEvent(type: .leftMouseDown, at: point, button: .left) {
       postTagged(down)
     }
     Thread.sleep(forTimeInterval: 0.05)
-    if let up = CGEvent(
-      mouseEventSource: nil, mouseType: .leftMouseUp,
-      mouseCursorPosition: point, mouseButton: .left)
-    {
+    if let up = makeSyntheticMouseEvent(type: .leftMouseUp, at: point, button: .left) {
       postTagged(up)
     }
   }
@@ -1659,6 +1653,36 @@ public class SpaceManager {
   /// through while consuming physical mouse input.
   public static let syntheticEventTag: Int64 = 0x5BACE
 
+  /// A private source keeps Spaceballs's synthetic button state independent
+  /// from the session's physical HID state. Without it, hardware movement
+  /// arriving while Spaceballs holds a synthetic button can be interpreted as
+  /// part of that drag before an event tap has a chance to distinguish it.
+  private static let syntheticMouseEventSource: CGEventSource? = {
+    guard let source = CGEventSource(stateID: .privateState) else { return nil }
+    source.userData = syntheticEventTag
+    source.setLocalEventsFilterDuringSuppressionState(
+      [.permitLocalKeyboardEvents, .permitSystemDefinedEvents],
+      state: .eventSuppressionStateRemoteMouseDrag)
+    return source
+  }()
+
+  /// Builds an identifiable event from the shared private source. Keeping one
+  /// source for the complete down/drag/up sequence preserves synthetic button
+  /// state without sharing it with the user's mouse.
+  static func makeSyntheticMouseEvent(
+    type: CGEventType, at point: CGPoint, button: CGMouseButton
+  ) -> CGEvent? {
+    guard let source = syntheticMouseEventSource,
+      let event = CGEvent(
+        mouseEventSource: source,
+        mouseType: type,
+        mouseCursorPosition: point,
+        mouseButton: button)
+    else { return nil }
+    event.setIntegerValueField(.eventSourceUserData, value: syntheticEventTag)
+    return event
+  }
+
   /// Tags a synthetic mouse event as Spaceballs-generated and posts it.
   private static func postTagged(_ event: CGEvent) {
     event.setIntegerValueField(.eventSourceUserData, value: syntheticEventTag)
@@ -1668,10 +1692,7 @@ public class SpaceManager {
   /// Moves the cursor to a point without any button press (e.g. to hover-expand
   /// Mission Control's spaces bar).
   static func postMouseMove(at point: CGPoint) {
-    if let move = CGEvent(
-      mouseEventSource: nil, mouseType: .mouseMoved,
-      mouseCursorPosition: point, mouseButton: .left)
-    {
+    if let move = makeSyntheticMouseEvent(type: .mouseMoved, at: point, button: .left) {
       postTagged(move)
     }
   }
@@ -1681,10 +1702,7 @@ public class SpaceManager {
     postMouseMove(at: point)
     Thread.sleep(forTimeInterval: 0.05)
 
-    if let down = CGEvent(
-      mouseEventSource: nil, mouseType: .leftMouseDown,
-      mouseCursorPosition: point, mouseButton: .left)
-    {
+    if let down = makeSyntheticMouseEvent(type: .leftMouseDown, at: point, button: .left) {
       postTagged(down)
     }
     Thread.sleep(forTimeInterval: 0.1)
@@ -1692,10 +1710,7 @@ public class SpaceManager {
 
   /// Posts a single mouseDragged event (mouse must already be down).
   static func postMouseDragEvent(at point: CGPoint) {
-    if let drag = CGEvent(
-      mouseEventSource: nil, mouseType: .leftMouseDragged,
-      mouseCursorPosition: point, mouseButton: .left)
-    {
+    if let drag = makeSyntheticMouseEvent(type: .leftMouseDragged, at: point, button: .left) {
       postTagged(drag)
     }
   }
@@ -1789,10 +1804,7 @@ public class SpaceManager {
 
   /// Posts a mouseUp event at the given point.
   static func postMouseUp(at point: CGPoint) {
-    if let up = CGEvent(
-      mouseEventSource: nil, mouseType: .leftMouseUp,
-      mouseCursorPosition: point, mouseButton: .left)
-    {
+    if let up = makeSyntheticMouseEvent(type: .leftMouseUp, at: point, button: .left) {
       postTagged(up)
     }
   }

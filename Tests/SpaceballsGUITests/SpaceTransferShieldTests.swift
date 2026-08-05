@@ -125,17 +125,34 @@ struct SpaceTransferInputPolicyTests {
 
     #expect(
       SpaceTransferInputPolicy.shouldSuppressMouseEvent(
-        sourceUserData: 0, now: Date(timeIntervalSinceReferenceDate: 99), deadline: deadline))
+        sourceUserData: 0,
+        sourceProcessID: 0,
+        currentProcessID: 42,
+        now: Date(timeIntervalSinceReferenceDate: 99),
+        deadline: deadline))
     #expect(
       !SpaceTransferInputPolicy.shouldSuppressMouseEvent(
-        sourceUserData: 0, now: deadline, deadline: deadline))
+        sourceUserData: 0,
+        sourceProcessID: 0,
+        currentProcessID: 42,
+        now: deadline,
+        deadline: deadline))
   }
 
-  @Test("Spaceballs synthetic mouse input always passes through")
+  @Test("Only Spaceballs-tagged mouse input from this process passes through")
   func syntheticInputPassesThrough() {
     #expect(
       !SpaceTransferInputPolicy.shouldSuppressMouseEvent(
         sourceUserData: SpaceTransferInputPolicy.syntheticEventTag,
+        sourceProcessID: 42,
+        currentProcessID: 42,
+        now: Date(timeIntervalSinceReferenceDate: 99),
+        deadline: Date(timeIntervalSinceReferenceDate: 100)))
+    #expect(
+      SpaceTransferInputPolicy.shouldSuppressMouseEvent(
+        sourceUserData: SpaceTransferInputPolicy.syntheticEventTag,
+        sourceProcessID: 0,
+        currentProcessID: 42,
         now: Date(timeIntervalSinceReferenceDate: 99),
         deadline: Date(timeIntervalSinceReferenceDate: 100)))
   }

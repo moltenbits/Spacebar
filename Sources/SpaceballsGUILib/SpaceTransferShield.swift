@@ -91,9 +91,12 @@ public enum SpaceTransferInputPolicy {
 
   public static func shouldSuppressMouseEvent(
     sourceUserData: Int64,
+    sourceProcessID: Int64,
+    currentProcessID: Int64,
     now: Date,
     deadline: Date
   ) -> Bool {
-    isBlockActive(now: now, deadline: deadline) && sourceUserData != syntheticEventTag
+    guard isBlockActive(now: now, deadline: deadline) else { return false }
+    return sourceUserData != syntheticEventTag || sourceProcessID != currentProcessID
   }
 }

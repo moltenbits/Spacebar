@@ -1,4 +1,5 @@
 import Cocoa
+import Darwin
 import SpaceballsCore
 import SpaceballsGUILib
 
@@ -122,6 +123,8 @@ private func mouseBlockerCallback(
 
   return SpaceTransferInputPolicy.shouldSuppressMouseEvent(
     sourceUserData: event.getIntegerValueField(.eventSourceUserData),
+    sourceProcessID: event.getIntegerValueField(.eventSourceUnixProcessID),
+    currentProcessID: Int64(getpid()),
     now: Date(),
     deadline: blocker.deadline)
     ? nil
