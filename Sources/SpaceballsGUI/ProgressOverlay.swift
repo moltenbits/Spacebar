@@ -1,4 +1,5 @@
 import Cocoa
+import SpaceballsGUILib
 import SwiftUI
 
 /// A full-screen, click-through overlay shown on EVERY display while a
@@ -12,11 +13,11 @@ import SwiftUI
 /// window is under the cursor, and an event-eating overlay would swallow
 /// them. The scrim is translucent so the Mission Control ballet stays
 /// visible underneath.
-final class ProgressOverlay {
+final class ProgressOverlay: SpaceTransferOverlayPresenting {
   private var panels: [NSPanel] = []
 
   func show(message: String, subtitle: String? = nil, showsSpinner: Bool = true) {
-    DispatchQueue.main.async { [self] in
+    performOnMain { [self] in
       dismissPanels()  // rebuild against the current screen set
       for screen in NSScreen.screens {
         let panel = NSPanel(
@@ -43,7 +44,7 @@ final class ProgressOverlay {
   }
 
   func update(message: String, subtitle: String? = nil, showsSpinner: Bool = false) {
-    DispatchQueue.main.async { [self] in
+    performOnMain { [self] in
       guard !panels.isEmpty else { return }
       for panel in panels {
         panel.contentView = NSHostingView(
@@ -54,7 +55,7 @@ final class ProgressOverlay {
   }
 
   func dismiss() {
-    DispatchQueue.main.async { [self] in
+    performOnMain { [self] in
       dismissPanels()
     }
   }
@@ -63,7 +64,7 @@ final class ProgressOverlay {
   /// arriving mid-fade takes over cleanly: it builds fresh panels while the
   /// old ones finish fading on their own.
   func dismiss(fadingOver duration: TimeInterval) {
-    DispatchQueue.main.async { [self] in
+    performOnMain { [self] in
       let fading = panels
       panels.removeAll()
       guard !fading.isEmpty else { return }
@@ -88,6 +89,17 @@ final class ProgressOverlay {
       panel.orderOut(nil)
     }
     panels.removeAll()
+  }
+
+  /// Eject and restore begin on the main thread. Present synchronously there
+  /// so Mission Control automation cannot race ahead of panel creation; keep
+  /// background callers safe by hopping them onto the main queue.
+  private func performOnMain(_ work: @escaping () -> Void) {
+    if Thread.isMainThread {
+      work()
+    } else {
+      DispatchQueue.main.async(execute: work)
+    }
   }
 }
 
