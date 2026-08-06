@@ -225,6 +225,22 @@ struct DockSwipeRoutingTests {
       ]))
   }
 
+  @Test("Cursor restoration runs while the CLI main queue is blocked")
+  func cursorRestorationDoesNotDependOnMainQueue() async {
+    let restoredWhileBlocked: Bool = await withCheckedContinuation { continuation in
+      DispatchQueue.main.async {
+        let restored = DispatchSemaphore(value: 0)
+        DockSwipeCursorRestoreScheduler.schedule(after: 0.01) {
+          restored.signal()
+        }
+        continuation.resume(
+          returning: restored.wait(timeout: .now() + 0.25) == .success)
+      }
+    }
+
+    #expect(restoredWhileBlocked)
+  }
+
   private func target() -> SpaceInfo {
     SpaceInfo(
       id: 11, uuid: "space-b-2", type: .desktop,

@@ -290,13 +290,20 @@ struct DockSwipeSystemDependencies {
     cursorPosition: { CGEvent(source: nil)?.location },
     warpCursor: { SpaceManager.warpCursor(to: $0) },
     schedule: { delay, work in
-      DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+      DockSwipeCursorRestoreScheduler.schedule(after: delay, work)
     },
     postEvents: { events in
       for event in events {
         event.post(tap: .cgSessionEventTap)
       }
     })
+}
+
+enum DockSwipeCursorRestoreScheduler {
+  static func schedule(after delay: TimeInterval, _ work: @escaping () -> Void) {
+    DispatchQueue.global(qos: .userInteractive).asyncAfter(
+      deadline: .now() + delay, execute: work)
+  }
 }
 
 final class DockSwipeSpaceSwitcher: InstantSpaceSwitching {
