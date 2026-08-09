@@ -649,6 +649,92 @@ public class SpaceManager {
     }
   }
 
+  // MARK: - Close Space With Windows
+
+  /// Closes every window trapped on a Space: apps whose windows all live on
+  /// that Space are quit (graceful `terminate()`, so unsaved work still
+  /// prompts); apps with windows elsewhere just lose their windows on this
+  /// Space. Waits (bounded by `timeout`) for the windows to disappear so a
+  /// subsequent Space close doesn't dump still-open windows onto other
+  /// Spaces, then calls `completion` — synchronously when there is nothing to
+  /// close, otherwise on a background queue.
+  public func closeWindowsInSpace(
+    id spaceID: UInt64, timeout: TimeInterval = 3.0,
+    completion: @escaping () -> Void
+  ) {
+    let plan = SpaceCloseWindowPlanner.plan(windows: getAllWindows(), spaceID: spaceID)
+    guard !plan.actions.isEmpty else {
+      completion()
+      return
+    }
+
+    for action in plan.actions {
+      switch action {
+      case .quitApp(let pid):
+        NSRunningApplication(processIdentifier: pid_t(pid))?.terminate()
+      case .closeWindow(let windowID):
+        try? closeWindow(id: windowID)
+      }
+    }
+
+    let expected = Set(plan.expectedClosedWindowIDs)
+    DispatchQueue.global(qos: .userInteractive).async { [self] in
+      let deadline = Date().addingTimeInterval(timeout)
+      while Date() < deadline {
+        if !getAllWindows().contains(where: { expected.contains($0.id) }) { break }
+        Thread.sleep(forTimeInterval: 0.15)
+      }
+      completion()
+    }
+  }
+
+  /// Closes a Space's windows first (quit-or-close per app), then closes the
+  /// Space itself and removes its name mapping. Space-level guards run up
+  /// front so a close that cannot succeed (last desktop, unknown ID) doesn't
+  /// destroy windows first.
+  public func closeSpaceWithWindowsAndRemoveName(
+    id spaceID: UInt64, spaceNameStore: SpaceNameStoring,
+    completion: @escaping (Result<Void, SpaceCloseError>) -> Void
+  ) {
+    let allSpaces = getAllSpaces()
+    guard allSpaces.filter({ $0.type == .desktop }).count > 1 else {
+      completion(.failure(.cannotCloseLastSpace))
+      return
+    }
+    guard allSpaces.contains(where: { $0.id == spaceID }) else {
+      completion(.failure(.spaceNotFound))
+      return
+    }
+
+    closeWindowsInSpace(id: spaceID) { [self] in
+      closeSpaceAndRemoveName(
+        id: spaceID, spaceNameStore: spaceNameStore, completion: completion)
+    }
+  }
+
+  /// Synchronous version for CLI usage.
+  public func closeSpaceWithWindowsAndRemoveNameSync(
+    id spaceID: UInt64, spaceNameStore: SpaceNameStoring
+  ) throws {
+    guard Self.ensureAccessibilityTrusted() else {
+      throw SpaceCloseError.accessibilityNotTrusted
+    }
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var result: Result<Void, SpaceCloseError>?
+
+    closeSpaceWithWindowsAndRemoveName(id: spaceID, spaceNameStore: spaceNameStore) { r in
+      result = r
+      semaphore.signal()
+    }
+
+    semaphore.wait()
+
+    if case .failure(let error) = result {
+      throw error
+    }
+  }
+
   // MARK: - Space Creation
 
   /// Creates a new desktop Space via the Dock's accessibility interface.
