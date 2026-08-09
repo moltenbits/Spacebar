@@ -14,7 +14,7 @@ public enum SpaceCloseWindowPlanner {
 
   public enum Action: Equatable {
     case quitApp(pid: Int)
-    case closeWindow(windowID: Int)
+    case closeWindow(windowID: Int, pid: Int)
   }
 
   public struct Plan: Equatable {
@@ -55,11 +55,72 @@ public enum SpaceCloseWindowPlanner {
       {
         actions.append(.quitApp(pid: pid))
       } else {
-        actions.append(contentsOf: trapped.map { .closeWindow(windowID: $0.id) })
+        actions.append(contentsOf: trapped.map { .closeWindow(windowID: $0.id, pid: pid) })
       }
       expectedClosedWindowIDs.append(contentsOf: trapped.map(\.id))
     }
 
     return Plan(actions: actions, expectedClosedWindowIDs: expectedClosedWindowIDs)
+  }
+}
+
+/// Thread-safe tracker for the close-windows phase: which windows still owe
+/// a close confirmation and which quit targets still owe a process exit.
+/// The wait polls these precise signals instead of re-enumerating windows —
+/// closed windows linger in CGWindowList (and quit victims stay until the
+/// process exits), so list-based polling pinned the wait at its timeout.
+final class WindowCloseWaitState {
+  private let lock = NSLock()
+  private var pendingWindows: Set<Int> = []
+  private var failedWindows: Set<Int> = []
+  private var quitPIDs: Set<Int> = []
+
+  func expectWindow(_ id: Int) {
+    lock.lock()
+    defer { lock.unlock() }
+    pendingWindows.insert(id)
+  }
+
+  func expectQuit(pid: Int) {
+    lock.lock()
+    defer { lock.unlock() }
+    quitPIDs.insert(pid)
+  }
+
+  /// Marks a window's close attempt finished. A failed press stops the wait
+  /// too — the window is not going to close, so there is nothing to wait for
+  /// (the space close will relocate it, and the summary reports it).
+  func resolveWindow(_ id: Int, closed: Bool) {
+    lock.lock()
+    defer { lock.unlock() }
+    pendingWindows.remove(id)
+    if !closed {
+      failedWindows.insert(id)
+    }
+  }
+
+  /// True when no close confirmations are outstanding and every quit
+  /// target's process is gone per `isRunning`.
+  func allSettled(isRunning: (Int) -> Bool) -> Bool {
+    lock.lock()
+    let windows = pendingWindows
+    let pids = quitPIDs
+    lock.unlock()
+    return windows.isEmpty && !pids.contains(where: isRunning)
+  }
+
+  /// Names everything the space close is about to relocate, for diagnostics.
+  func unsettledSummary(isRunning: (Int) -> Bool) -> String {
+    lock.lock()
+    let windows = pendingWindows
+    let failed = failedWindows
+    let pids = quitPIDs
+    lock.unlock()
+
+    var parts: [String] = []
+    parts += windows.sorted().map { "window-\($0)-unconfirmed" }
+    parts += failed.sorted().map { "window-\($0)-close-failed" }
+    parts += pids.sorted().filter(isRunning).map { "pid-\($0)-still-running" }
+    return parts.joined(separator: ",")
   }
 }

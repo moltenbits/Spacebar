@@ -38,7 +38,7 @@ struct SpaceCloseWindowPlannerTests {
         window(2, pid: 100, spaces: [7]),
       ], spaceID: 5)
 
-    #expect(plan.actions == [.closeWindow(windowID: 1)])
+    #expect(plan.actions == [.closeWindow(windowID: 1, pid: 100)])
     #expect(plan.expectedClosedWindowIDs == [1])
   }
 
@@ -59,7 +59,7 @@ struct SpaceCloseWindowPlannerTests {
         window(2, pid: 100, spaces: [5]),
       ], spaceID: 5)
 
-    #expect(plan.actions == [.closeWindow(windowID: 2)])
+    #expect(plan.actions == [.closeWindow(windowID: 2, pid: 100)])
     #expect(plan.expectedClosedWindowIDs == [2])
   }
 
@@ -68,7 +68,7 @@ struct SpaceCloseWindowPlannerTests {
     let plan = SpaceCloseWindowPlanner.plan(
       windows: [window(1, pid: 100, app: "Finder", spaces: [5])], spaceID: 5)
 
-    #expect(plan.actions == [.closeWindow(windowID: 1)])
+    #expect(plan.actions == [.closeWindow(windowID: 1, pid: 100)])
   }
 
   @Test("Windows on other spaces produce no actions")
@@ -109,8 +109,59 @@ struct SpaceCloseWindowPlannerTests {
         window(4, pid: 200, app: "Safari", spaces: [9]),
       ], spaceID: 5)
 
-    #expect(plan.actions == [.quitApp(pid: 100), .closeWindow(windowID: 2)])
+    #expect(plan.actions == [.quitApp(pid: 100), .closeWindow(windowID: 2, pid: 200)])
     #expect(plan.expectedClosedWindowIDs == [1, 3, 2])
+  }
+}
+
+// MARK: - Window Close Wait State
+
+@Suite("Window Close Wait State")
+struct WindowCloseWaitStateTests {
+
+  @Test("Empty state is settled")
+  func emptySettled() {
+    #expect(WindowCloseWaitState().allSettled(isRunning: { _ in true }))
+  }
+
+  @Test("A pending window blocks settling until its close attempt resolves")
+  func pendingWindowBlocks() {
+    let state = WindowCloseWaitState()
+    state.expectWindow(42)
+    #expect(!state.allSettled(isRunning: { _ in false }))
+
+    state.resolveWindow(42, closed: true)
+    #expect(state.allSettled(isRunning: { _ in false }))
+  }
+
+  @Test("A failed close resolves the wait but is reported as a leftover")
+  func failedCloseResolvesButReports() {
+    let state = WindowCloseWaitState()
+    state.expectWindow(42)
+    state.resolveWindow(42, closed: false)
+
+    #expect(state.allSettled(isRunning: { _ in false }))
+    #expect(state.unsettledSummary(isRunning: { _ in false }) == "window-42-close-failed")
+  }
+
+  @Test("A quit target blocks settling only while its process runs")
+  func quitBlocksWhileRunning() {
+    let state = WindowCloseWaitState()
+    state.expectQuit(pid: 7)
+
+    #expect(!state.allSettled(isRunning: { _ in true }))
+    #expect(state.allSettled(isRunning: { _ in false }))
+  }
+
+  @Test("Leftover summary names unconfirmed windows and still-running pids")
+  func summaryNamesLeftovers() {
+    let state = WindowCloseWaitState()
+    state.expectWindow(2)
+    state.expectQuit(pid: 7)
+    state.expectQuit(pid: 9)
+
+    let summary = state.unsettledSummary(isRunning: { $0 == 9 })
+    #expect(summary == "window-2-unconfirmed,pid-9-still-running")
   }
 }
 
@@ -195,12 +246,12 @@ struct CloseSpaceWithWindowsTests {
     #expect(completed)
   }
 
-  @Test("closeWindowsInSpace still completes when windows refuse to disappear")
-  func waitTimesOutOnSurvivingWindows() async {
+  @Test("closeWindowsInSpace completes when the quit target's process is already gone")
+  func quitTargetAlreadyGoneCompletes() async {
     var ds = twoSpaceDataSource()
     // A quit-eligible app on the doomed space with an invalid pid: the
-    // terminate is a no-op, so the window never leaves the list and the
-    // bounded wait must expire rather than hang.
+    // terminate is a no-op and the process check reports it gone, so the
+    // wait settles immediately instead of running out the timeout.
     ds.windowList = [makeWindowDict(id: 42, ownerName: "Stuck App", pid: -1)]
     ds.windowSpaces = [42: [11]]
     let manager = SpaceManager(dataSource: ds)

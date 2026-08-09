@@ -673,7 +673,8 @@ public class SpaceManager {
   /// Closes every window trapped on a Space: apps whose windows all live on
   /// that Space are quit (graceful `terminate()`, so unsaved work still
   /// prompts); apps with windows elsewhere just lose their windows on this
-  /// Space. Waits (bounded by `timeout`) for the windows to disappear so a
+  /// Space. Waits (bounded by `timeout`) on precise completion signals —
+  /// process exit for quits, a confirmed AX press for closes — so a
   /// subsequent Space close doesn't dump still-open windows onto other
   /// Spaces, then calls `completion` — synchronously when there is nothing to
   /// close, otherwise on a background queue.
@@ -687,22 +688,48 @@ public class SpaceManager {
       return
     }
 
+    let describe: (SpaceCloseWindowPlanner.Action) -> String = {
+      switch $0 {
+      case .quitApp(let pid): return "quit-pid-\(pid)"
+      case .closeWindow(let windowID, _): return "close-window-\(windowID)"
+      }
+    }
+    Diagnostics.log(
+      "close-space",
+      "space \(spaceID) windows-phase start: \(plan.actions.map(describe).joined(separator: " "))")
+
+    let state = WindowCloseWaitState()
+    let started = Date()
     for action in plan.actions {
       switch action {
       case .quitApp(let pid):
+        state.expectQuit(pid: pid)
         NSRunningApplication(processIdentifier: pid_t(pid))?.terminate()
-      case .closeWindow(let windowID):
-        try? closeWindow(id: windowID)
+      case .closeWindow(let windowID, let pid):
+        state.expectWindow(windowID)
+        performAXClose(windowID: windowID, pid: pid_t(pid)) { closed in
+          state.resolveWindow(windowID, closed: closed)
+        }
       }
     }
 
-    let expected = Set(plan.expectedClosedWindowIDs)
-    DispatchQueue.global(qos: .userInteractive).async { [self] in
-      let deadline = Date().addingTimeInterval(timeout)
-      while Date() < deadline {
-        if !getAllWindows().contains(where: { expected.contains($0.id) }) { break }
-        Thread.sleep(forTimeInterval: 0.15)
+    let isRunning: (Int) -> Bool = { pid in
+      guard let app = NSRunningApplication(processIdentifier: pid_t(pid)) else { return false }
+      return !app.isTerminated
+    }
+    DispatchQueue.global(qos: .userInteractive).async {
+      let deadline = started.addingTimeInterval(timeout)
+      while Date() < deadline, !state.allSettled(isRunning: isRunning) {
+        Thread.sleep(forTimeInterval: 0.05)
       }
+      // Brief grace so confirmed closes finish ordering out before MC opens.
+      Thread.sleep(forTimeInterval: 0.15)
+
+      let leftovers = state.unsettledSummary(isRunning: isRunning)
+      Diagnostics.log(
+        "close-space",
+        "space \(spaceID) windows-phase done waited=\(Int(Date().timeIntervalSince(started) * 1000))ms\(leftovers.isEmpty ? "" : " relocating=[\(leftovers)]")"
+      )
       completion()
     }
   }
@@ -1687,16 +1714,29 @@ public class SpaceManager {
       throw WindowActivationError.accessibilityNotTrusted
     }
 
-    let pid = pid_t(window.pid)
+    performAXClose(windowID: windowID, pid: pid_t(window.pid))
+  }
+
+  /// Presses the window's AX close button on a background queue and reports
+  /// whether the press was delivered. Confirmed closes are tombstoned so the
+  /// window disappears from enumeration even on a non-current Space (where
+  /// the window server keeps listing it and AX can't be consulted).
+  func performAXClose(
+    windowID: Int, pid: pid_t, completion: ((Bool) -> Void)? = nil
+  ) {
+    guard AXIsProcessTrusted() else {
+      completion?(false)
+      return
+    }
     let targetCGWindowID = CGWindowID(windowID)
 
-    // Dispatch AX close to a background queue (same pattern as AltTab).
     DispatchQueue.global(qos: .userInteractive).async { [self] in
       guard
         let axWindow = findAXWindowStandard(pid: pid, targetCGWindowID: targetCGWindowID)
           ?? findAXWindowBruteForce(pid: pid, targetCGWindowID: targetCGWindowID)
       else {
-        print("closeWindow: AX element not found for window \(windowID)")
+        Diagnostics.log("close-window", "windowID=\(windowID) AX element not found")
+        completion?(false)
         return
       }
 
@@ -1707,20 +1747,20 @@ public class SpaceManager {
         ) == .success,
         let closeButton = closeButtonRef
       else {
-        print("closeWindow: close button not found for window \(windowID)")
+        Diagnostics.log("close-window", "windowID=\(windowID) close button not found")
+        completion?(false)
         return
       }
 
       let result = AXUIElementPerformAction(
         closeButton as! AXUIElement, kAXPressAction as CFString)
       if result == .success {
-        // The close was delivered — tombstone the ID so the window is hidden
-        // durably even if it lives on a non-current Space (where the window
-        // server will keep listing it and AX can't be consulted).
         markWindowClosed(id: windowID)
       } else {
-        print("closeWindow: kAXPressAction failed (\(result.rawValue)) for window \(windowID)")
+        Diagnostics.log(
+          "close-window", "windowID=\(windowID) kAXPressAction failed (\(result.rawValue))")
       }
+      completion?(result == .success)
     }
   }
 
