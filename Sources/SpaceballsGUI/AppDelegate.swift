@@ -1112,7 +1112,7 @@ extension AppDelegate: KeyInterceptorDelegate {
     // Hide panel before the close so MC can open cleanly
     hidePanel()
 
-    viewModel.spaceManager.closeSpaceAndRemoveName(
+    viewModel.spaceManager.closeSpaceWithWindowsAndRemoveName(
       id: spaceID, spaceNameStore: viewModel.spaceNameStore
     ) { [weak self] result in
       guard let self else { return }
