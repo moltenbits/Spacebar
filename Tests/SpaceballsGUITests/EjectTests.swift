@@ -246,3 +246,166 @@ struct EjectStoreTests {
     #expect(store.activeSpaceRecords() == ["d2": "u5"])
   }
 }
+
+// MARK: - Display Fingerprints
+
+private func fingerprint(
+  vendor: UInt32 = 100, model: UInt32 = 200, serial: UInt32 = 0,
+  x: Double = 0, y: Double = 0
+) -> DisplayFingerprint {
+  DisplayFingerprint(
+    vendorNumber: vendor, modelNumber: model, serialNumber: serial,
+    originX: x, originY: y)
+}
+
+@Suite("Display Fingerprint Matching")
+struct DisplayFingerprintTests {
+
+  @Test("A unique hardware match wins regardless of its new UUID")
+  func uniqueHardwareMatch() {
+    let connected = [
+      "new-uuid": fingerprint(vendor: 1, model: 2, serial: 3),
+      "other": fingerprint(vendor: 9, model: 9, serial: 9),
+    ]
+    #expect(
+      DisplayFingerprint.match(
+        recorded: fingerprint(vendor: 1, model: 2, serial: 3, x: 500),
+        connected: connected) == "new-uuid")
+  }
+
+  @Test("Identical twin displays tie-break by arrangement position")
+  func twinsTieBreakByPosition() {
+    let connected = [
+      "left": fingerprint(x: -1800, y: 0),
+      "right": fingerprint(x: 1800, y: 0),
+    ]
+    #expect(
+      DisplayFingerprint.match(
+        recorded: fingerprint(x: 1790, y: 10), connected: connected) == "right")
+    #expect(
+      DisplayFingerprint.match(
+        recorded: fingerprint(x: -1750, y: 0), connected: connected) == "left")
+  }
+
+  @Test("Different hardware never matches")
+  func differentHardwareNoMatch() {
+    #expect(
+      DisplayFingerprint.match(
+        recorded: fingerprint(vendor: 1),
+        connected: ["x": fingerprint(vendor: 2)]) == nil)
+  }
+
+  @Test("Fingerprints round-trip through their plist dictionary form")
+  func dictionaryRoundTrip() {
+    let original = fingerprint(vendor: 10, model: 20, serial: 30, x: -1800, y: 42)
+    #expect(DisplayFingerprint(dictionary: original.dictionary) == original)
+  }
+}
+
+@Suite("Restore Planning With Fingerprints")
+struct RestoreFingerprintPlanningTests {
+
+  @Test("A recorded display that returns under a new UUID is matched by hardware and remapped")
+  func remapsToReassignedUUID() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true),
+      desktop(id: 3, uuid: "u3", display: "b"),
+      desktop(id: 2, uuid: "u2", display: "d-new", current: true),
+    ]
+    let plan = RestorePlanner.plan(
+      spaces: spaces, pending: ["u3": "d-old"],
+      recordedFingerprints: ["d-old": fingerprint()],
+      connectedFingerprints: ["b": fingerprint(vendor: 9), "d-new": fingerprint()])
+
+    #expect(plan.moves.map(\.spaceUUID) == ["u3"])
+    #expect(plan.moves[0].targetDisplayUUID == "d-new")
+    #expect(plan.displayRemap == ["d-old": "d-new"])
+    #expect(plan.waiting.isEmpty)
+  }
+
+  @Test("A space already sitting on the remapped display is completed")
+  func completedViaRemap() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true),
+      desktop(id: 3, uuid: "u3", display: "d-new", current: true),
+    ]
+    let plan = RestorePlanner.plan(
+      spaces: spaces, pending: ["u3": "d-old"],
+      recordedFingerprints: ["d-old": fingerprint()],
+      connectedFingerprints: ["b": fingerprint(vendor: 9), "d-new": fingerprint()])
+
+    #expect(plan.completed == ["u3"])
+    #expect(plan.moves.isEmpty)
+  }
+
+  @Test("An exactly-matching connected UUID wins over any fingerprint twin")
+  func exactUUIDBeatsFingerprint() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true),
+      desktop(id: 3, uuid: "u3", display: "b"),
+      desktop(id: 2, uuid: "u2", display: "d1", current: true),
+      desktop(id: 4, uuid: "u4", display: "d-twin", current: true),
+    ]
+    let plan = RestorePlanner.plan(
+      spaces: spaces, pending: ["u3": "d1"],
+      recordedFingerprints: ["d1": fingerprint()],
+      connectedFingerprints: ["d1": fingerprint(), "d-twin": fingerprint()])
+
+    #expect(plan.moves.map(\.targetDisplayUUID) == ["d1"])
+    #expect(plan.displayRemap.isEmpty)
+  }
+
+  @Test("Without a recorded fingerprint an absent display still waits")
+  func legacyRecordsKeepWaiting() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true),
+      desktop(id: 3, uuid: "u3", display: "b"),
+    ]
+    let plan = RestorePlanner.plan(
+      spaces: spaces, pending: ["u3": "d-old"],
+      recordedFingerprints: [:],
+      connectedFingerprints: ["b": fingerprint()])
+    #expect(plan.waiting == ["u3"])
+  }
+
+  @Test("A fingerprint with no hardware match keeps waiting")
+  func unmatchedFingerprintWaits() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true),
+      desktop(id: 3, uuid: "u3", display: "b"),
+    ]
+    let plan = RestorePlanner.plan(
+      spaces: spaces, pending: ["u3": "d-old"],
+      recordedFingerprints: ["d-old": fingerprint(vendor: 1)],
+      connectedFingerprints: ["b": fingerprint(vendor: 2)])
+    #expect(plan.waiting == ["u3"])
+    #expect(plan.displayRemap.isEmpty)
+  }
+}
+
+@Suite("Eject Store Fingerprints")
+struct EjectStoreFingerprintTests {
+
+  private func makeStore() -> EjectStore {
+    let suite = "eject-store-fp-tests-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    return EjectStore(defaults: defaults)
+  }
+
+  @Test("Fingerprints round-trip and prune with their last referencing record")
+  func roundTripAndPrune() {
+    let store = makeStore()
+    store.recordEjection(spaceUUID: "u3", originalDisplayUUID: "d1")
+    store.recordEjection(spaceUUID: "u4", originalDisplayUUID: "d1")
+    store.recordDisplayFingerprint(displayUUID: "d1", fingerprint: fingerprint(x: 5))
+    #expect(store.displayFingerprints() == ["d1": fingerprint(x: 5)])
+
+    store.clearEjection(spaceUUID: "u3")
+    // d1 is still referenced by u4's record — fingerprint kept.
+    #expect(store.displayFingerprints() == ["d1": fingerprint(x: 5)])
+
+    store.clearEjection(spaceUUID: "u4")
+    #expect(store.displayFingerprints().isEmpty)
+  }
+}
