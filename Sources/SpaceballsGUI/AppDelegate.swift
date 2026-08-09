@@ -1235,7 +1235,9 @@ extension AppDelegate: KeyInterceptorDelegate {
       // "New Space" — create unnamed space on the active display
       keyInterceptor.setSuppressConfirm(true)
 
-      viewModel.spaceManager.createSpace(count: 1, screenNumber: activeScreenNumber) {
+      viewModel.spaceManager.createSpace(
+        count: 1, screenNumber: activeScreenNumber, switchToNewSpace: true
+      ) {
         [weak self] result in
         guard let self else { return }
 
