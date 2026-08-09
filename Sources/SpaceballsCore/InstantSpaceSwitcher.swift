@@ -39,10 +39,36 @@ enum DockSwipePlanner {
   }
 }
 
+/// Why the DockSwipe path refused a switch. Carried on `.declined` so the
+/// caller can log which fail-closed branch fired — the silent decline +
+/// silent MC fallback previously made wrong-space landings undiagnosable.
+enum DockSwipeDeclineReason: Equatable, CustomStringConvertible {
+  case notDesktop
+  case plannerInvalid(currentIndex: Int, targetIndex: Int, spaceCount: Int)
+  case accessibilityNotTrusted
+  case missionControlActive
+  case cursorDisplayUnknown
+  case displayUnresolved
+  case eventCreationFailed
+
+  var description: String {
+    switch self {
+    case .notDesktop: return "not-desktop"
+    case .plannerInvalid(let current, let target, let count):
+      return "planner-invalid current=\(current) target=\(target) count=\(count)"
+    case .accessibilityNotTrusted: return "accessibility-not-trusted"
+    case .missionControlActive: return "mission-control-active"
+    case .cursorDisplayUnknown: return "cursor-display-unknown"
+    case .displayUnresolved: return "display-unresolved"
+    case .eventCreationFailed: return "event-creation-failed"
+    }
+  }
+}
+
 enum InstantSpaceSwitchResult: Equatable {
   case switched
   case alreadyThere
-  case declined
+  case declined(DockSwipeDeclineReason)
 }
 
 protocol InstantSpaceSwitching: AnyObject {
@@ -320,7 +346,7 @@ final class DockSwipeSpaceSwitcher: InstantSpaceSwitching {
   func switchToSpace(_ target: SpaceInfo, among spaces: [SpaceInfo])
     -> InstantSpaceSwitchResult
   {
-    guard target.type == .desktop else { return .declined }
+    guard target.type == .desktop else { return .declined(.notDesktop) }
 
     let displaySpaces = spaces.filter { $0.displayUUID == target.displayUUID }
     let currentIndex = displaySpaces.firstIndex(where: \.isCurrent) ?? -1
@@ -335,24 +361,31 @@ final class DockSwipeSpaceSwitcher: InstantSpaceSwitching {
     case .alreadyThere:
       return .alreadyThere
     case .invalid:
-      return .declined
+      return .declined(
+        .plannerInvalid(
+          currentIndex: currentIndex, targetIndex: targetIndex,
+          spaceCount: displaySpaces.count))
     case .navigate(let navigationPlan):
       plan = navigationPlan
     }
 
-    guard dependencies.accessibilityTrusted(), !dependencies.missionControlActive()
-    else { return .declined }
+    guard dependencies.accessibilityTrusted() else {
+      return .declined(.accessibilityNotTrusted)
+    }
+    guard !dependencies.missionControlActive() else {
+      return .declined(.missionControlActive)
+    }
 
     guard let cursorDisplayUUID = dependencies.cursorDisplayUUID() else {
-      return .declined
+      return .declined(.cursorDisplayUnknown)
     }
     if cursorDisplayUUID == target.displayUUID {
-      return post(plan) ? .switched : .declined
+      return post(plan) ? .switched : .declined(.eventCreationFailed)
     }
 
     guard let displayID = dependencies.displayIDForUUID(target.displayUUID),
       let originalCursorPosition = dependencies.cursorPosition()
-    else { return .declined }
+    else { return .declined(.displayUnresolved) }
 
     let bounds = dependencies.displayBounds(displayID)
     let routingPoint = CGPoint(x: bounds.midX, y: bounds.midY)
@@ -360,7 +393,7 @@ final class DockSwipeSpaceSwitcher: InstantSpaceSwitching {
 
     guard post(plan) else {
       dependencies.warpCursor(originalCursorPosition)
-      return .declined
+      return .declined(.eventCreationFailed)
     }
 
     let dependencies = dependencies

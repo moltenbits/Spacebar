@@ -476,8 +476,10 @@ public class SpaceManager {
       return
     case .alreadyThere:
       return
-    case .declined:
-      break
+    case .declined(let reason):
+      Diagnostics.log(
+        "space-switch",
+        "space \(spaceID) dock-swipe declined (\(reason)); falling back to MC tile press")
     }
 
     guard Self.ensureAccessibilityTrusted() else {
@@ -513,7 +515,13 @@ public class SpaceManager {
   /// Returns true when the fast windowed path succeeded.
   @discardableResult
   public func activateSpace(id spaceID: UInt64) throws -> Bool {
-    if let window = frontWindow(onSpace: spaceID) {
+    let lookupStart = Date()
+    let window = frontWindow(onSpace: spaceID)
+    Diagnostics.log(
+      "space-switch",
+      "space \(spaceID) front-window=\(window.map { String($0.id) } ?? "none") lookup=\(Int(Date().timeIntervalSince(lookupStart) * 1000))ms"
+    )
+    if let window {
       do {
         try activateWindow(id: window.id)
         return true
@@ -765,6 +773,10 @@ public class SpaceManager {
     }
 
     let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+    let beforeUUIDs = Set(getAllSpaces().map(\.uuid))
+    Diagnostics.log(
+      "space-create",
+      "create started count=\(count) screen=\(screenNumber.map(String.init) ?? "primary")")
 
     CoreDockSendNotification("com.apple.expose.awake" as CFString)
 
@@ -841,6 +853,11 @@ public class SpaceManager {
       Thread.sleep(forTimeInterval: 0.3)
       Self.dismissMissionControl()
 
+      let newSpaces = Self.newlyCreatedSpaces(before: beforeUUIDs, after: self.getAllSpaces())
+      Diagnostics.log(
+        "space-create",
+        "created \(created) of \(count); new=[\(newSpaces.map { "id=\($0.id) uuid=\($0.uuid)" }.joined(separator: "; "))] mc-dismiss-sent"
+      )
       completion?(.success(created))
     }
   }
@@ -1082,11 +1099,12 @@ public class SpaceManager {
     }
 
     let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+    let before = currentSpace(onDisplayID: screenNumber)
 
     // Open Mission Control via the Dock's private CoreDock API.
     CoreDockSendNotification("com.apple.expose.awake" as CFString)
 
-    DispatchQueue.global(qos: .userInteractive).async {
+    DispatchQueue.global(qos: .userInteractive).async { [self] in
       // Poll for the Mission Control AX group to appear in the Dock's children.
       let mcGroup: AXUIElement? = {
         let deadline = DispatchTime.now() + .milliseconds(1000)
@@ -1133,8 +1151,55 @@ public class SpaceManager {
       }
 
       let spaceButton = children[spaceIndex]
-      AXUIElementPerformAction(spaceButton, kAXPressAction as CFString)
+      let tileTitle = Self.axStringAttribute(spaceButton, name: "AXTitle") ?? "?"
+      Diagnostics.log(
+        "space-switch",
+        "mc-tile-press display=\(screenNumber) index=\(spaceIndex)/\(children.count) title=\"\(tileTitle)\" before=\(before.map { String($0.id) } ?? "?")"
+      )
+      let pressResult = AXUIElementPerformAction(spaceButton, kAXPressAction as CFString)
+      guard pressResult == .success else {
+        Self.reportMCFailure(
+          "switchToSpace: tile press failed (\(pressResult.rawValue)) index=\(spaceIndex)")
+        return
+      }
+      logLandedSpace(afterTilePressOn: screenNumber, requestedIndex: spaceIndex, before: before)
     }
+  }
+
+  /// The display's current Space per CGS, resolved via space display UUIDs.
+  private func currentSpace(onDisplayID displayID: CGDirectDisplayID) -> SpaceInfo? {
+    getAllSpaces().first {
+      $0.isCurrent && Self.displayIDForUUID($0.displayUUID) == displayID
+    }
+  }
+
+  /// Polls CGS after an MC tile press and logs where the display actually
+  /// landed. The press itself is async and unverified — this is the only
+  /// record of whether the requested tile index matched reality, which is
+  /// exactly what goes wrong when the bar and the CGS snapshot disagree
+  /// (e.g. right after a space is created).
+  private func logLandedSpace(
+    afterTilePressOn displayID: CGDirectDisplayID, requestedIndex: Int, before: SpaceInfo?
+  ) {
+    let deadline = Date().addingTimeInterval(2.0)
+    var landed = currentSpace(onDisplayID: displayID)
+    while Date() < deadline, landed?.id == before?.id {
+      Thread.sleep(forTimeInterval: 0.1)
+      landed = currentSpace(onDisplayID: displayID)
+    }
+    guard let landed else {
+      Diagnostics.log(
+        "space-switch", "mc-tile-press landed=unknown (no current space resolved)")
+      return
+    }
+    let desktops = getAllSpaces().filter {
+      $0.type == .desktop && $0.displayUUID == landed.displayUUID
+    }
+    let landedIndex = desktops.firstIndex(where: { $0.id == landed.id }) ?? -1
+    Diagnostics.log(
+      "space-switch",
+      "mc-tile-press landed=\(landed.id) uuid=\(landed.uuid) index=\(landedIndex) requested=\(requestedIndex) match=\(landedIndex == requestedIndex) changed=\(landed.id != before?.id)"
+    )
   }
 
   // MARK: - Dock AX Helpers
@@ -3116,9 +3181,13 @@ public class SpaceManager {
       return false
     }
     let spaces = getAllSpaces()
-    guard instantSpaceSwitcher.switchToSpace(target, among: spaces) == .switched else {
-      return false
+    let instantResult = instantSpaceSwitcher.switchToSpace(target, among: spaces)
+    if case .declined(let reason) = instantResult {
+      Diagnostics.log(
+        "activate",
+        "windowID=\(windowID) dock-swipe declined (\(reason)) targetSpaceID=\(target.id)")
     }
+    guard instantResult == .switched else { return false }
     let switched = waitForCurrentSpace(target.id, timeout: timeout)
     Diagnostics.log(
       "activate",
