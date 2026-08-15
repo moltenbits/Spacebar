@@ -176,24 +176,78 @@ struct DockSwipeRoutingTests {
     #expect(recorder.warpedPoints == [CGPoint(x: 150, y: 250)])
   }
 
-  @Test("Untrusted, Mission Control, and unresolved displays fail closed")
+  @Test("Untrusted, Mission Control, and unresolved displays fail closed with their reason")
   func failClosed() {
     let untrusted = DockSwipeSystemRecorder(cursorDisplayUUID: "display-b")
     untrusted.accessibilityTrusted = false
     #expect(
       DockSwipeSpaceSwitcher(dependencies: untrusted.dependencies)
-        .switchToSpace(target(), among: spaces()) == .declined)
+        .switchToSpace(target(), among: spaces()) == .declined(.accessibilityNotTrusted))
 
     let missionControl = DockSwipeSystemRecorder(cursorDisplayUUID: "display-b")
     missionControl.missionControlActive = true
     #expect(
       DockSwipeSpaceSwitcher(dependencies: missionControl.dependencies)
-        .switchToSpace(target(), among: spaces()) == .declined)
+        .switchToSpace(target(), among: spaces()) == .declined(.missionControlActive))
 
     let unresolved = DockSwipeSystemRecorder(cursorDisplayUUID: nil)
     #expect(
       DockSwipeSpaceSwitcher(dependencies: unresolved.dependencies)
-        .switchToSpace(target(), among: spaces()) == .declined)
+        .switchToSpace(target(), among: spaces()) == .declined(.cursorDisplayUnknown))
+  }
+
+  @Test("Non-desktop targets decline before touching the system")
+  func nonDesktopDeclined() {
+    let recorder = DockSwipeSystemRecorder(cursorDisplayUUID: "display-b")
+    let fullscreen = SpaceInfo(
+      id: 90, uuid: "space-b-fs", type: .fullscreen,
+      displayUUID: "display-b", isCurrent: false)
+
+    #expect(
+      DockSwipeSpaceSwitcher(dependencies: recorder.dependencies)
+        .switchToSpace(fullscreen, among: spaces() + [fullscreen])
+        == .declined(.notDesktop))
+    #expect(recorder.postedEventCounts.isEmpty)
+  }
+
+  @Test("A snapshot without a current space on the target display declines with indices")
+  func plannerInvalidCarriesIndices() {
+    let recorder = DockSwipeSystemRecorder(cursorDisplayUUID: "display-b")
+    // The target display's spaces list has no isCurrent entry — the exact
+    // shape a transiently inconsistent CGS snapshot produces right after a
+    // space is created.
+    let orphanTarget = target()
+
+    #expect(
+      DockSwipeSpaceSwitcher(dependencies: recorder.dependencies)
+        .switchToSpace(orphanTarget, among: [orphanTarget])
+        == .declined(.plannerInvalid(currentIndex: -1, targetIndex: 0, spaceCount: 1)))
+  }
+
+  @Test("Cross-display routing declines when the target display cannot be resolved")
+  func unresolvableTargetDisplayDeclined() {
+    let recorder = DockSwipeSystemRecorder(cursorDisplayUUID: "display-a")
+    let current = SpaceInfo(
+      id: 20, uuid: "space-c-1", type: .desktop,
+      displayUUID: "display-c", isCurrent: true)
+    let unreachable = SpaceInfo(
+      id: 21, uuid: "space-c-2", type: .desktop,
+      displayUUID: "display-c", isCurrent: false)
+
+    // displayIDForUUID resolves only "display-b", so display-c is unresolvable.
+    #expect(
+      DockSwipeSpaceSwitcher(dependencies: recorder.dependencies)
+        .switchToSpace(unreachable, among: [current, unreachable])
+        == .declined(.displayUnresolved))
+    #expect(recorder.warpedPoints.isEmpty)
+  }
+
+  @Test("Decline reasons format for the diagnostics log")
+  func declineReasonDescriptions() {
+    #expect("\(DockSwipeDeclineReason.missionControlActive)" == "mission-control-active")
+    #expect(
+      "\(DockSwipeDeclineReason.plannerInvalid(currentIndex: -1, targetIndex: 3, spaceCount: 4))"
+        == "planner-invalid current=-1 target=3 count=4")
   }
 
   @Test("Already-current requests are a no-op without system access")

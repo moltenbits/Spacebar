@@ -107,6 +107,13 @@ extension SpaceManager {
       ejectStore.recordEjection(
         spaceUUID: move.spaceUUID, originalDisplayUUID: move.sourceDisplayUUID)
     }
+    // Fingerprint each home display so restore can find it again even if
+    // macOS hands it a different UUID on reconnect.
+    for displayUUID in Set(verified.map(\.sourceDisplayUUID)) {
+      if let fingerprint = Self.captureDisplayFingerprint(displayUUID: displayUUID) {
+        ejectStore.recordDisplayFingerprint(displayUUID: displayUUID, fingerprint: fingerprint)
+      }
+    }
     let verifiedIDs = Set(verified.map(\.spaceID))
     let summary = EjectSummary(
       ejected: verified.map(\.spaceUUID),
@@ -138,7 +145,21 @@ extension SpaceManager {
     }
     let token = Diagnostics.beginTiming("eject", "restoreEjectedSpaces")
 
-    let plan = RestorePlanner.plan(spaces: getAllSpaces(), pending: pending)
+    let spaces = getAllSpaces()
+    let connectedFingerprints = Dictionary(
+      uniqueKeysWithValues: Set(spaces.map(\.displayUUID)).compactMap { uuid in
+        Self.captureDisplayFingerprint(displayUUID: uuid).map { (uuid, $0) }
+      })
+    let plan = RestorePlanner.plan(
+      spaces: spaces, pending: pending,
+      recordedFingerprints: ejectStore.displayFingerprints(),
+      connectedFingerprints: connectedFingerprints)
+    for (recorded, resolved) in plan.displayRemap {
+      Diagnostics.log(
+        "eject",
+        "restore remap: recorded display \(recorded) matched by hardware fingerprint to \(resolved)"
+      )
+    }
     for spaceUUID in plan.stale + plan.completed {
       ejectStore.clearEjection(spaceUUID: spaceUUID)
     }
@@ -148,7 +169,7 @@ extension SpaceManager {
       ejectStore.clearEjection(spaceUUID: move.spaceUUID)
     }
 
-    reactivateRecordedActiveSpaces(ejectStore: ejectStore)
+    reactivateRecordedActiveSpaces(ejectStore: ejectStore, displayRemap: plan.displayRemap)
 
     let summary = SpaceRestoreSummary(restored: restored.map(\.spaceUUID), waiting: plan.waiting)
     Diagnostics.endTiming(
@@ -249,7 +270,9 @@ extension SpaceManager {
   /// Control appearance is fully waited out before continuing.
   /// Records for spaces that no longer exist are dropped; records whose
   /// space or display isn't back yet are kept for a later restore.
-  private func reactivateRecordedActiveSpaces(ejectStore: EjectRecordStoring) {
+  private func reactivateRecordedActiveSpaces(
+    ejectStore: EjectRecordStoring, displayRemap: [String: String] = [:]
+  ) {
     let records = ejectStore.activeSpaceRecords()
     guard !records.isEmpty else { return }
     let spaces = getAllSpaces()
@@ -260,8 +283,11 @@ extension SpaceManager {
         ejectStore.clearActiveSpace(displayUUID: displayUUID)
         continue
       }
-      guard connectedDisplays.contains(displayUUID),
-        space.displayUUID == displayUUID
+      // The record's display may have come back under a new UUID — judge
+      // "is the space home again" against the resolved display.
+      let resolved = displayRemap[displayUUID] ?? displayUUID
+      guard connectedDisplays.contains(resolved),
+        space.displayUUID == resolved
       else { continue }
 
       if !space.isCurrent {

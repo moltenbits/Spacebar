@@ -1306,3 +1306,33 @@ struct WindowBoundsLookupTests {
     #expect(manager.windowBounds(forWindowID: 99) == nil)
   }
 }
+
+// MARK: - Per-Display Desktop Index
+
+@Suite("Per-Display Desktop Index")
+struct PerDisplayDesktopIndexTests {
+
+  private let spaces: [SpaceInfo] = [
+    SpaceInfo(id: 1, uuid: "u1", type: .desktop, displayUUID: "display-A", isCurrent: true),
+    SpaceInfo(id: 2, uuid: "u2", type: .fullscreen, displayUUID: "display-A", isCurrent: false),
+    SpaceInfo(id: 3, uuid: "u3", type: .desktop, displayUUID: "display-A", isCurrent: false),
+    SpaceInfo(id: 4, uuid: "u4", type: .desktop, displayUUID: "display-B", isCurrent: true),
+  ]
+
+  @Test("Index counts only desktop spaces on the space's own display")
+  func skipsFullscreenAndOtherDisplays() {
+    #expect(SpaceManager.perDisplayDesktopIndex(of: 1, in: spaces) == 0)
+    #expect(SpaceManager.perDisplayDesktopIndex(of: 3, in: spaces) == 1)
+    #expect(SpaceManager.perDisplayDesktopIndex(of: 4, in: spaces) == 0)
+  }
+
+  @Test("Fullscreen spaces have no desktop tile index")
+  func fullscreenHasNoIndex() {
+    #expect(SpaceManager.perDisplayDesktopIndex(of: 2, in: spaces) == nil)
+  }
+
+  @Test("Unknown space IDs resolve to nil")
+  func unknownSpace() {
+    #expect(SpaceManager.perDisplayDesktopIndex(of: 99, in: spaces) == nil)
+  }
+}

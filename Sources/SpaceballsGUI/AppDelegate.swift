@@ -1112,7 +1112,7 @@ extension AppDelegate: KeyInterceptorDelegate {
     // Hide panel before the close so MC can open cleanly
     hidePanel()
 
-    viewModel.spaceManager.closeSpaceAndRemoveName(
+    viewModel.spaceManager.closeSpaceWithWindowsAndRemoveName(
       id: spaceID, spaceNameStore: viewModel.spaceNameStore
     ) { [weak self] result in
       guard let self else { return }
@@ -1235,7 +1235,9 @@ extension AppDelegate: KeyInterceptorDelegate {
       // "New Space" — create unnamed space on the active display
       keyInterceptor.setSuppressConfirm(true)
 
-      viewModel.spaceManager.createSpace(count: 1, screenNumber: activeScreenNumber) {
+      viewModel.spaceManager.createSpace(
+        count: 1, screenNumber: activeScreenNumber, switchToNewSpace: true
+      ) {
         [weak self] result in
         guard let self else { return }
 

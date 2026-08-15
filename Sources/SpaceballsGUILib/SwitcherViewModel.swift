@@ -1293,7 +1293,10 @@ public final class SwitcherViewModel: ObservableObject {
       warpCursorIfNeeded(targetDisplayUUID: targetDisplay, windowID: id)
     case .spaceHeader(let spaceID):
       guard let section = filteredSections.first(where: { $0.id == spaceID })
-      else { return }
+      else {
+        Diagnostics.log("activate", "spaceHeader \(spaceID) not in filteredSections; ignoring")
+        return
+      }
       warpCursorIfNeeded(
         targetDisplayUUID: section.displayUUID, windowID: section.windows.first?.id)
       if let firstWindow = section.windows.first {

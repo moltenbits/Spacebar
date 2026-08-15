@@ -109,18 +109,43 @@ public enum RestorePlanner {
   public struct Plan: Equatable {
     public let preSwitches: [EjectPlanner.PreSwitch]
     public let moves: [EjectPlanner.Move]
-    /// Records whose space is already on its recorded display — clear them.
+    /// Records whose space is already on its (resolved) home display — clear them.
     public let completed: [String]
     /// Records whose space no longer exists — clear them.
     public let stale: [String]
     /// Records whose display is still disconnected — keep them.
     public let waiting: [String]
+    /// Recorded display UUIDs that were resolved to a DIFFERENT connected
+    /// UUID by hardware fingerprint — macOS reassigned the display's UUID
+    /// across the reconnect (recorded UUID → connected UUID).
+    public let displayRemap: [String: String]
   }
 
-  public static func plan(spaces: [SpaceInfo], pending: [String: String]) -> Plan {
+  /// `recordedFingerprints`/`connectedFingerprints` let a record whose exact
+  /// display UUID never returned resolve to the same physical display under
+  /// its new UUID. With them empty, only exact UUID matches restore —
+  /// legacy records keep their old semantics.
+  public static func plan(
+    spaces: [SpaceInfo], pending: [String: String],
+    recordedFingerprints: [String: DisplayFingerprint] = [:],
+    connectedFingerprints: [String: DisplayFingerprint] = [:]
+  ) -> Plan {
     let connectedDisplays = Set(spaces.map(\.displayUUID))
     let spaceByUUID = Dictionary(
       spaces.map { ($0.uuid, $0) }, uniquingKeysWith: { first, _ in first })
+
+    var displayRemap: [String: String] = [:]
+    func resolveDisplay(_ recorded: String) -> String? {
+      if connectedDisplays.contains(recorded) { return recorded }
+      if let cached = displayRemap[recorded] { return cached }
+      guard let fingerprint = recordedFingerprints[recorded],
+        let matched = DisplayFingerprint.match(
+          recorded: fingerprint, connected: connectedFingerprints),
+        connectedDisplays.contains(matched)
+      else { return nil }
+      displayRemap[recorded] = matched
+      return matched
+    }
 
     var restorable: [String: String] = [:]
     var completed: [String] = []
@@ -131,12 +156,14 @@ public enum RestorePlanner {
         stale.append(spaceUUID)
         continue
       }
-      if space.displayUUID == displayUUID {
-        completed.append(spaceUUID)
-      } else if !connectedDisplays.contains(displayUUID) {
+      guard let resolved = resolveDisplay(displayUUID) else {
         waiting.append(spaceUUID)
+        continue
+      }
+      if space.displayUUID == resolved {
+        completed.append(spaceUUID)
       } else {
-        restorable[spaceUUID] = displayUUID
+        restorable[spaceUUID] = resolved
       }
     }
 
@@ -168,6 +195,7 @@ public enum RestorePlanner {
 
     return Plan(
       preSwitches: preSwitches, moves: moves,
-      completed: completed.sorted(), stale: stale.sorted(), waiting: waiting.sorted())
+      completed: completed.sorted(), stale: stale.sorted(), waiting: waiting.sorted(),
+      displayRemap: displayRemap)
   }
 }

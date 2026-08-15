@@ -14,6 +14,13 @@ struct CloseSpaceCommand: ParsableCommand {
   )
   var space: String
 
+  @Flag(
+    name: .customLong("close-windows"),
+    help:
+      "Close the Space's windows first — quitting apps whose windows all live on that Space — instead of letting them relocate to other Spaces."
+  )
+  var closeWindows = false
+
   func run() throws {
     let manager = SpaceManager()
     let store = SpaceNameStore()
@@ -25,7 +32,11 @@ struct CloseSpaceCommand: ParsableCommand {
       )
     }
 
-    try manager.closeSpaceAndRemoveNameSync(id: spaceID, spaceNameStore: store)
+    if closeWindows {
+      try manager.closeSpaceWithWindowsAndRemoveNameSync(id: spaceID, spaceNameStore: store)
+    } else {
+      try manager.closeSpaceAndRemoveNameSync(id: spaceID, spaceNameStore: store)
+    }
     Thread.sleep(forTimeInterval: 1.0)
     print("Closed space \(space)")
   }

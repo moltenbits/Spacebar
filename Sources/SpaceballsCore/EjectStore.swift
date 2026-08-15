@@ -17,6 +17,10 @@ public protocol EjectRecordStoring {
   func recordActiveSpace(displayUUID: String, spaceUUID: String)
   func activeSpaceRecords() -> [String: String]
   func clearActiveSpace(displayUUID: String)
+  /// Hardware identity of each recorded home display, so restore can find
+  /// the display again when macOS reassigns its UUID across a reconnect.
+  func recordDisplayFingerprint(displayUUID: String, fingerprint: DisplayFingerprint)
+  func displayFingerprints() -> [String: DisplayFingerprint]
 }
 
 // MARK: - UserDefaults Implementation
@@ -30,6 +34,7 @@ public final class EjectStore: EjectRecordStoring {
   private static let key = "ejectedSpaces"
   private static let armedKey = "armedEjectedSpaces"
   private static let activeSpacesKey = "ejectedActiveSpaces"
+  private static let fingerprintsKey = "ejectedDisplayFingerprints"
   private let defaults: UserDefaults
 
   public init(defaults: UserDefaults = UserDefaults(suiteName: "com.moltenbits.spaceballs.shared")!)
@@ -55,6 +60,7 @@ public final class EjectStore: EjectRecordStoring {
     records.removeValue(forKey: spaceUUID)
     defaults.set(records, forKey: Self.key)
     disarm(spaceUUID: spaceUUID)
+    pruneFingerprints(referencedDisplays: Set(records.values))
   }
 
   public func armedEjections() -> Set<String> {
@@ -87,5 +93,25 @@ public final class EjectStore: EjectRecordStoring {
     var records = activeSpaceRecords()
     records.removeValue(forKey: displayUUID)
     defaults.set(records, forKey: Self.activeSpacesKey)
+  }
+
+  public func recordDisplayFingerprint(displayUUID: String, fingerprint: DisplayFingerprint) {
+    var records = rawFingerprints()
+    records[displayUUID] = fingerprint.dictionary
+    defaults.set(records, forKey: Self.fingerprintsKey)
+  }
+
+  public func displayFingerprints() -> [String: DisplayFingerprint] {
+    rawFingerprints().compactMapValues(DisplayFingerprint.init(dictionary:))
+  }
+
+  private func rawFingerprints() -> [String: [String: Double]] {
+    defaults.dictionary(forKey: Self.fingerprintsKey) as? [String: [String: Double]] ?? [:]
+  }
+
+  /// Drops fingerprints for displays no pending record references anymore.
+  private func pruneFingerprints(referencedDisplays: Set<String>) {
+    let kept = rawFingerprints().filter { referencedDisplays.contains($0.key) }
+    defaults.set(kept, forKey: Self.fingerprintsKey)
   }
 }

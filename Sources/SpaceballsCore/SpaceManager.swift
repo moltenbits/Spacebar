@@ -476,19 +476,17 @@ public class SpaceManager {
       return
     case .alreadyThere:
       return
-    case .declined:
-      break
+    case .declined(let reason):
+      Diagnostics.log(
+        "space-switch",
+        "space \(spaceID) dock-swipe declined (\(reason)); falling back to MC tile press")
     }
 
     guard Self.ensureAccessibilityTrusted() else {
       throw SpaceSwitchError.accessibilityNotTrusted
     }
 
-    let displaySpaces =
-      allSpaces
-      .filter { $0.displayUUID == targetSpace.displayUUID && $0.type == .desktop }
-
-    guard let spaceIndex = displaySpaces.firstIndex(where: { $0.id == spaceID }) else {
+    guard let spaceIndex = Self.perDisplayDesktopIndex(of: spaceID, in: allSpaces) else {
       throw SpaceSwitchError.spaceNotFound(spaceID: spaceID)
     }
 
@@ -513,7 +511,13 @@ public class SpaceManager {
   /// Returns true when the fast windowed path succeeded.
   @discardableResult
   public func activateSpace(id spaceID: UInt64) throws -> Bool {
-    if let window = frontWindow(onSpace: spaceID) {
+    let lookupStart = Date()
+    let window = frontWindow(onSpace: spaceID)
+    Diagnostics.log(
+      "space-switch",
+      "space \(spaceID) front-window=\(window.map { String($0.id) } ?? "none") lookup=\(Int(Date().timeIntervalSince(lookupStart) * 1000))ms"
+    )
+    if let window {
       do {
         try activateWindow(id: window.id)
         return true
@@ -590,7 +594,10 @@ public class SpaceManager {
     guard !missingNames.isEmpty else { return 0 }
 
     let beforeUUIDs = Set(getAllSpaces().map(\.uuid))
-    try createSpaceSync(count: missingNames.count)
+    // A single new space zooms straight into itself from the create session;
+    // multi-space restores keep the no-switch create (each workspace is
+    // visited in turn by the restorer anyway).
+    try createSpaceSync(count: missingNames.count, switchToNewSpace: missingNames.count == 1)
     Thread.sleep(forTimeInterval: 1.0)
 
     let newSpaces = Self.newlyCreatedSpaces(before: beforeUUIDs, after: getAllSpaces())
@@ -623,6 +630,18 @@ public class SpaceManager {
     after.filter { $0.type == .desktop && !before.contains($0.uuid) }
   }
 
+  /// The space's 0-based tile index among its display's desktop spaces —
+  /// the per-display CGS order that matches Mission Control's bar
+  /// (fullscreen spaces have no desktop tile). Nil for unknown or
+  /// fullscreen spaces.
+  static func perDisplayDesktopIndex(of spaceID: UInt64, in spaces: [SpaceInfo]) -> Int? {
+    guard let space = spaces.first(where: { $0.id == spaceID }) else { return nil }
+    return
+      spaces
+      .filter { $0.displayUUID == space.displayUUID && $0.type == .desktop }
+      .firstIndex(where: { $0.id == spaceID })
+  }
+
   /// Closes a space by ID and removes its name mapping.
   public func closeSpaceAndRemoveName(
     id spaceID: UInt64, spaceNameStore: SpaceNameStoring,
@@ -649,6 +668,119 @@ public class SpaceManager {
     }
   }
 
+  // MARK: - Close Space With Windows
+
+  /// Closes every window trapped on a Space: apps whose windows all live on
+  /// that Space are quit (graceful `terminate()`, so unsaved work still
+  /// prompts); apps with windows elsewhere just lose their windows on this
+  /// Space. Waits (bounded by `timeout`) on precise completion signals —
+  /// process exit for quits, a confirmed AX press for closes — so a
+  /// subsequent Space close doesn't dump still-open windows onto other
+  /// Spaces, then calls `completion` — synchronously when there is nothing to
+  /// close, otherwise on a background queue.
+  public func closeWindowsInSpace(
+    id spaceID: UInt64, timeout: TimeInterval = 3.0,
+    completion: @escaping () -> Void
+  ) {
+    let plan = SpaceCloseWindowPlanner.plan(windows: getAllWindows(), spaceID: spaceID)
+    guard !plan.actions.isEmpty else {
+      completion()
+      return
+    }
+
+    let describe: (SpaceCloseWindowPlanner.Action) -> String = {
+      switch $0 {
+      case .quitApp(let pid): return "quit-pid-\(pid)"
+      case .closeWindow(let windowID, _): return "close-window-\(windowID)"
+      }
+    }
+    Diagnostics.log(
+      "close-space",
+      "space \(spaceID) windows-phase start: \(plan.actions.map(describe).joined(separator: " "))")
+
+    let state = WindowCloseWaitState()
+    let started = Date()
+    for action in plan.actions {
+      switch action {
+      case .quitApp(let pid):
+        state.expectQuit(pid: pid)
+        NSRunningApplication(processIdentifier: pid_t(pid))?.terminate()
+      case .closeWindow(let windowID, let pid):
+        state.expectWindow(windowID)
+        performAXClose(windowID: windowID, pid: pid_t(pid)) { closed in
+          state.resolveWindow(windowID, closed: closed)
+        }
+      }
+    }
+
+    let isRunning: (Int) -> Bool = { pid in
+      guard let app = NSRunningApplication(processIdentifier: pid_t(pid)) else { return false }
+      return !app.isTerminated
+    }
+    DispatchQueue.global(qos: .userInteractive).async {
+      let deadline = started.addingTimeInterval(timeout)
+      while Date() < deadline, !state.allSettled(isRunning: isRunning) {
+        Thread.sleep(forTimeInterval: 0.05)
+      }
+      // Brief grace so confirmed closes finish ordering out before MC opens.
+      Thread.sleep(forTimeInterval: 0.15)
+
+      let leftovers = state.unsettledSummary(isRunning: isRunning)
+      Diagnostics.log(
+        "close-space",
+        "space \(spaceID) windows-phase done waited=\(Int(Date().timeIntervalSince(started) * 1000))ms\(leftovers.isEmpty ? "" : " relocating=[\(leftovers)]")"
+      )
+      completion()
+    }
+  }
+
+  /// Closes a Space's windows first (quit-or-close per app), then closes the
+  /// Space itself and removes its name mapping. Space-level guards run up
+  /// front so a close that cannot succeed (last desktop, unknown ID) doesn't
+  /// destroy windows first.
+  public func closeSpaceWithWindowsAndRemoveName(
+    id spaceID: UInt64, spaceNameStore: SpaceNameStoring,
+    completion: @escaping (Result<Void, SpaceCloseError>) -> Void
+  ) {
+    let allSpaces = getAllSpaces()
+    guard allSpaces.filter({ $0.type == .desktop }).count > 1 else {
+      completion(.failure(.cannotCloseLastSpace))
+      return
+    }
+    guard allSpaces.contains(where: { $0.id == spaceID }) else {
+      completion(.failure(.spaceNotFound))
+      return
+    }
+
+    closeWindowsInSpace(id: spaceID) { [self] in
+      closeSpaceAndRemoveName(
+        id: spaceID, spaceNameStore: spaceNameStore, completion: completion)
+    }
+  }
+
+  /// Synchronous version for CLI usage.
+  public func closeSpaceWithWindowsAndRemoveNameSync(
+    id spaceID: UInt64, spaceNameStore: SpaceNameStoring
+  ) throws {
+    guard Self.ensureAccessibilityTrusted() else {
+      throw SpaceCloseError.accessibilityNotTrusted
+    }
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var result: Result<Void, SpaceCloseError>?
+
+    closeSpaceWithWindowsAndRemoveName(id: spaceID, spaceNameStore: spaceNameStore) { r in
+      result = r
+      semaphore.signal()
+    }
+
+    semaphore.wait()
+
+    if case .failure(let error) = result {
+      throw error
+    }
+  }
+
   // MARK: - Space Creation
 
   /// Creates a new desktop Space via the Dock's accessibility interface.
@@ -659,9 +791,17 @@ public class SpaceManager {
   /// - Parameter screenNumber: Display to create the space on. Defaults to the
   ///   PRIMARY display — spaces on external displays are destroyed when the
   ///   display disconnects, collapsing their windows into a surviving space.
+  /// - Parameter switchToNewSpace: When true (and exactly one space was
+  ///   created), presses the new space's tile in the SAME Mission Control
+  ///   session, so the session ends by zooming straight into the new space —
+  ///   no dismissal, no settle pause, no separate switch. Verified via CGS;
+  ///   falls back to a guarded dismiss + `switchToSpace(id:)` if the landing
+  ///   isn't confirmed. Callers that must not change the active Space (eject's
+  ///   Default Space creation) leave this false.
   /// - Parameter completion: Called on the main queue when done, with success/failure.
   public func createSpace(
     count: Int = 1, screenNumber: CGDirectDisplayID? = nil,
+    switchToNewSpace: Bool = false,
     completion: ((Result<Int, SpaceCreateError>) -> Void)? = nil
   ) {
     guard AXIsProcessTrusted() else {
@@ -679,6 +819,10 @@ public class SpaceManager {
     }
 
     let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+    let beforeUUIDs = Set(getAllSpaces().map(\.uuid))
+    Diagnostics.log(
+      "space-create",
+      "create started count=\(count) screen=\(screenNumber.map(String.init) ?? "primary")")
 
     CoreDockSendNotification("com.apple.expose.awake" as CFString)
 
@@ -708,7 +852,7 @@ public class SpaceManager {
       // display are destroyed when that display disconnects and macOS dumps
       // their windows into a surviving space, so workspace/default spaces must
       // never live on removable displays.
-      let addButton: AXUIElement? = {
+      let addResult: (button: AXUIElement, mcSpaces: AXUIElement)? = {
         let requestedScreen = screenNumber ?? CGMainDisplayID()
         let displayElements: [AXUIElement]
         if let targetDisplay = Self.axChildMatchingDisplay(
@@ -725,17 +869,17 @@ public class SpaceManager {
         for displayChild in displayElements {
           if let mcSpaces = Self.axChildWithIdentifier(displayChild, identifier: "mc.spaces") {
             if let add = Self.axChildWithIdentifier(mcSpaces, identifier: "mc.spaces.add") {
-              return add
+              return (add, mcSpaces)
             }
             if let add = Self.findAddButton(in: mcSpaces) {
-              return add
+              return (add, mcSpaces)
             }
           }
         }
         return nil
       }()
 
-      guard let addButton else {
+      guard let addResult else {
         // Dismiss Mission Control before reporting error
         Self.dismissMissionControl()
         completion?(.failure(.addButtonNotFound))
@@ -744,7 +888,7 @@ public class SpaceManager {
 
       var created = 0
       for i in 0..<count {
-        let result = AXUIElementPerformAction(addButton, kAXPressAction as CFString)
+        let result = AXUIElementPerformAction(addResult.button, kAXPressAction as CFString)
         guard result == .success else { break }
         created += 1
         if i < count - 1 {
@@ -752,15 +896,107 @@ public class SpaceManager {
         }
       }
 
+      // End the session by zooming straight into the new space when asked —
+      // the dismiss-then-reswitch alternative costs a dismissal animation
+      // plus settle pauses on the space the user is leaving anyway.
+      if switchToNewSpace, created == 1,
+        let newSpace = self.awaitNewSpace(before: beforeUUIDs, timeout: 1.5)
+      {
+        let landed = self.pressNewSpaceTileAndVerify(newSpace, mcSpaces: addResult.mcSpaces)
+        if !landed {
+          // Restore the invariant (MC gone), then the verified switch.
+          Self.dismissMissionControlIfPresent(dockElement: dockElement)
+          Self.awaitMissionControlDismissed(timeout: 2.0)
+          try? self.switchToSpace(id: newSpace.id)
+        }
+        Diagnostics.log(
+          "space-create",
+          "created 1 of 1; new=[id=\(newSpace.id) uuid=\(newSpace.uuid)] switch-on-create=\(landed ? "landed" : "fallback")"
+        )
+        completion?(.success(created))
+        return
+      }
+
       Thread.sleep(forTimeInterval: 0.3)
       Self.dismissMissionControl()
 
+      let newSpaces = Self.newlyCreatedSpaces(before: beforeUUIDs, after: self.getAllSpaces())
+      Diagnostics.log(
+        "space-create",
+        "created \(created) of \(count); new=[\(newSpaces.map { "id=\($0.id) uuid=\($0.uuid)" }.joined(separator: "; "))] mc-dismiss-sent"
+      )
       completion?(.success(created))
     }
   }
 
+  /// Polls CGS until a space not in `before` appears — macOS registers the
+  /// new space a beat after the add-button press.
+  private func awaitNewSpace(before: Set<String>, timeout: TimeInterval) -> SpaceInfo? {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if let new = Self.newlyCreatedSpaces(before: before, after: getAllSpaces()).first {
+        return new
+      }
+      Thread.sleep(forTimeInterval: 0.05)
+    }
+    return nil
+  }
+
+  /// Presses the just-created space's tile in the still-open Mission Control
+  /// session and confirms via CGS that the display landed on it. The bar is
+  /// re-read AFTER the add press (the new tile shifted it), and the index
+  /// comes from the per-display CGS desktop order — the same invariant the
+  /// tile-press switching path relies on.
+  private func pressNewSpaceTileAndVerify(
+    _ newSpace: SpaceInfo, mcSpaces: AXUIElement
+  ) -> Bool {
+    guard
+      let mcSpacesList = Self.axChildWithIdentifier(mcSpaces, identifier: "mc.spaces.list")
+    else {
+      Diagnostics.log("space-create", "switch-on-create: mc.spaces.list not found")
+      return false
+    }
+    guard let tileIndex = Self.perDisplayDesktopIndex(of: newSpace.id, in: getAllSpaces())
+    else {
+      Diagnostics.log("space-create", "switch-on-create: no tile index for id=\(newSpace.id)")
+      return false
+    }
+
+    // Give the fresh tile a beat to become interactive before pressing.
+    Thread.sleep(forTimeInterval: 0.2)
+
+    let children = Self.axChildren(mcSpacesList)
+    guard tileIndex < children.count else {
+      Diagnostics.log(
+        "space-create",
+        "switch-on-create: tile index \(tileIndex) out of range (have \(children.count))")
+      return false
+    }
+
+    let tile = children[tileIndex]
+    let title = Self.axStringAttribute(tile, name: "AXTitle") ?? "?"
+    Diagnostics.log(
+      "space-create",
+      "switch-on-create pressing tile index=\(tileIndex)/\(children.count) title=\"\(title)\" target=id=\(newSpace.id)"
+    )
+    guard AXUIElementPerformAction(tile, kAXPressAction as CFString) == .success else {
+      Diagnostics.log("space-create", "switch-on-create: tile press failed")
+      return false
+    }
+
+    let deadline = Date().addingTimeInterval(2.0)
+    while Date() < deadline {
+      if getAllSpaces().contains(where: { $0.id == newSpace.id && $0.isCurrent }) {
+        return true
+      }
+      Thread.sleep(forTimeInterval: 0.1)
+    }
+    Diagnostics.log("space-create", "switch-on-create: landing not confirmed by CGS")
+    return false
+  }
+
   /// Synchronous version for CLI usage.
-  public func createSpaceSync(count: Int = 1) throws {
+  public func createSpaceSync(count: Int = 1, switchToNewSpace: Bool = false) throws {
     guard Self.ensureAccessibilityTrusted() else {
       throw SpaceCreateError.accessibilityNotTrusted
     }
@@ -768,7 +1004,7 @@ public class SpaceManager {
     let semaphore = DispatchSemaphore(value: 0)
     var result: Result<Int, SpaceCreateError>?
 
-    createSpace(count: count) { r in
+    createSpace(count: count, switchToNewSpace: switchToNewSpace) { r in
       result = r
       semaphore.signal()
     }
@@ -996,11 +1232,12 @@ public class SpaceManager {
     }
 
     let dockElement = AXUIElementCreateApplication(dockApp.processIdentifier)
+    let before = currentSpace(onDisplayID: screenNumber)
 
     // Open Mission Control via the Dock's private CoreDock API.
     CoreDockSendNotification("com.apple.expose.awake" as CFString)
 
-    DispatchQueue.global(qos: .userInteractive).async {
+    DispatchQueue.global(qos: .userInteractive).async { [self] in
       // Poll for the Mission Control AX group to appear in the Dock's children.
       let mcGroup: AXUIElement? = {
         let deadline = DispatchTime.now() + .milliseconds(1000)
@@ -1047,8 +1284,55 @@ public class SpaceManager {
       }
 
       let spaceButton = children[spaceIndex]
-      AXUIElementPerformAction(spaceButton, kAXPressAction as CFString)
+      let tileTitle = Self.axStringAttribute(spaceButton, name: "AXTitle") ?? "?"
+      Diagnostics.log(
+        "space-switch",
+        "mc-tile-press display=\(screenNumber) index=\(spaceIndex)/\(children.count) title=\"\(tileTitle)\" before=\(before.map { String($0.id) } ?? "?")"
+      )
+      let pressResult = AXUIElementPerformAction(spaceButton, kAXPressAction as CFString)
+      guard pressResult == .success else {
+        Self.reportMCFailure(
+          "switchToSpace: tile press failed (\(pressResult.rawValue)) index=\(spaceIndex)")
+        return
+      }
+      logLandedSpace(afterTilePressOn: screenNumber, requestedIndex: spaceIndex, before: before)
     }
+  }
+
+  /// The display's current Space per CGS, resolved via space display UUIDs.
+  private func currentSpace(onDisplayID displayID: CGDirectDisplayID) -> SpaceInfo? {
+    getAllSpaces().first {
+      $0.isCurrent && Self.displayIDForUUID($0.displayUUID) == displayID
+    }
+  }
+
+  /// Polls CGS after an MC tile press and logs where the display actually
+  /// landed. The press itself is async and unverified — this is the only
+  /// record of whether the requested tile index matched reality, which is
+  /// exactly what goes wrong when the bar and the CGS snapshot disagree
+  /// (e.g. right after a space is created).
+  private func logLandedSpace(
+    afterTilePressOn displayID: CGDirectDisplayID, requestedIndex: Int, before: SpaceInfo?
+  ) {
+    let deadline = Date().addingTimeInterval(2.0)
+    var landed = currentSpace(onDisplayID: displayID)
+    while Date() < deadline, landed?.id == before?.id {
+      Thread.sleep(forTimeInterval: 0.1)
+      landed = currentSpace(onDisplayID: displayID)
+    }
+    guard let landed else {
+      Diagnostics.log(
+        "space-switch", "mc-tile-press landed=unknown (no current space resolved)")
+      return
+    }
+    let desktops = getAllSpaces().filter {
+      $0.type == .desktop && $0.displayUUID == landed.displayUUID
+    }
+    let landedIndex = desktops.firstIndex(where: { $0.id == landed.id }) ?? -1
+    Diagnostics.log(
+      "space-switch",
+      "mc-tile-press landed=\(landed.id) uuid=\(landed.uuid) index=\(landedIndex) requested=\(requestedIndex) match=\(landedIndex == requestedIndex) changed=\(landed.id != before?.id)"
+    )
   }
 
   // MARK: - Dock AX Helpers
@@ -1430,16 +1714,29 @@ public class SpaceManager {
       throw WindowActivationError.accessibilityNotTrusted
     }
 
-    let pid = pid_t(window.pid)
+    performAXClose(windowID: windowID, pid: pid_t(window.pid))
+  }
+
+  /// Presses the window's AX close button on a background queue and reports
+  /// whether the press was delivered. Confirmed closes are tombstoned so the
+  /// window disappears from enumeration even on a non-current Space (where
+  /// the window server keeps listing it and AX can't be consulted).
+  func performAXClose(
+    windowID: Int, pid: pid_t, completion: ((Bool) -> Void)? = nil
+  ) {
+    guard AXIsProcessTrusted() else {
+      completion?(false)
+      return
+    }
     let targetCGWindowID = CGWindowID(windowID)
 
-    // Dispatch AX close to a background queue (same pattern as AltTab).
     DispatchQueue.global(qos: .userInteractive).async { [self] in
       guard
         let axWindow = findAXWindowStandard(pid: pid, targetCGWindowID: targetCGWindowID)
           ?? findAXWindowBruteForce(pid: pid, targetCGWindowID: targetCGWindowID)
       else {
-        print("closeWindow: AX element not found for window \(windowID)")
+        Diagnostics.log("close-window", "windowID=\(windowID) AX element not found")
+        completion?(false)
         return
       }
 
@@ -1450,20 +1747,20 @@ public class SpaceManager {
         ) == .success,
         let closeButton = closeButtonRef
       else {
-        print("closeWindow: close button not found for window \(windowID)")
+        Diagnostics.log("close-window", "windowID=\(windowID) close button not found")
+        completion?(false)
         return
       }
 
       let result = AXUIElementPerformAction(
         closeButton as! AXUIElement, kAXPressAction as CFString)
       if result == .success {
-        // The close was delivered — tombstone the ID so the window is hidden
-        // durably even if it lives on a non-current Space (where the window
-        // server will keep listing it and AX can't be consulted).
         markWindowClosed(id: windowID)
       } else {
-        print("closeWindow: kAXPressAction failed (\(result.rawValue)) for window \(windowID)")
+        Diagnostics.log(
+          "close-window", "windowID=\(windowID) kAXPressAction failed (\(result.rawValue))")
       }
+      completion?(result == .success)
     }
   }
 
@@ -3030,9 +3327,13 @@ public class SpaceManager {
       return false
     }
     let spaces = getAllSpaces()
-    guard instantSpaceSwitcher.switchToSpace(target, among: spaces) == .switched else {
-      return false
+    let instantResult = instantSpaceSwitcher.switchToSpace(target, among: spaces)
+    if case .declined(let reason) = instantResult {
+      Diagnostics.log(
+        "activate",
+        "windowID=\(windowID) dock-swipe declined (\(reason)) targetSpaceID=\(target.id)")
     }
+    guard instantResult == .switched else { return false }
     let switched = waitForCurrentSpace(target.id, timeout: timeout)
     Diagnostics.log(
       "activate",
