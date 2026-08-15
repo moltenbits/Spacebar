@@ -41,6 +41,11 @@ public struct CGSDataSource: SystemDataSource {
     return result.map { $0.uint64Value }
   }
 
+  public func appInfo(pid: pid_t) -> AppInfo? {
+    guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
+    return AppInfo(policy: app.activationPolicy, bundleID: app.bundleIdentifier)
+  }
+
   public func liveAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? {
     // Without AX trust the query returns nothing meaningful; report "unknown"
     // so callers keep windows rather than hiding real ones.

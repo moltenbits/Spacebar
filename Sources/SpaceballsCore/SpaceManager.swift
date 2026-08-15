@@ -91,22 +91,22 @@ public class SpaceManager {
     self.instantSpaceSwitcher = instantSpaceSwitcher
   }
 
-  private typealias AppInfo = (policy: NSApplication.ActivationPolicy, bundleID: String?)
-
   /// Returns whether a window from the given PID should be included in results.
   private func shouldIncludeWindow(
-    pid: pid_t, appInfoCache: inout [pid_t: AppInfo]
+    pid: pid_t, appInfoCache: inout [pid_t: AppInfo?]
   ) -> Bool {
     if pid == selfPID { return true }
 
-    let info: AppInfo
+    let info: AppInfo?
     if let cached = appInfoCache[pid] {
       info = cached
     } else {
-      let app = NSRunningApplication(processIdentifier: pid)
-      info = (app?.activationPolicy ?? .regular, app?.bundleIdentifier)
+      info = dataSource.appInfo(pid: pid)
       appInfoCache[pid] = info
     }
+
+    // No LaunchServices-registered app owns this pid; keep its windows.
+    guard let info else { return true }
 
     switch info.policy {
     case .regular:
@@ -170,7 +170,7 @@ public class SpaceManager {
     let windowList = dataSource.fetchWindowList()
 
     // Cache activation policy per PID to avoid repeated lookups.
-    var appInfoCache: [pid_t: AppInfo] = [:]
+    var appInfoCache: [pid_t: AppInfo?] = [:]
 
     var windows: [WindowInfo] = []
 
@@ -304,7 +304,7 @@ public class SpaceManager {
   /// Returns `nil` if no qualifying window is found.
   public func frontmostWindowID(onSpace spaceID: UInt64) -> Int? {
     let onScreen = dataSource.fetchOnScreenWindowList()
-    var appInfoCache: [pid_t: AppInfo] = [:]
+    var appInfoCache: [pid_t: AppInfo?] = [:]
 
     for entry in onScreen {
       guard let windowID = entry[kCGWindowNumber as String] as? Int,
