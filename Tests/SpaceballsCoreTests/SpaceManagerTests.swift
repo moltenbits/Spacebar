@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -15,6 +16,9 @@ struct MockDataSource: SystemDataSource {
   /// (AX unavailable → conservative keep); map to an explicit set (possibly
   /// empty) to simulate a queryable app.
   var liveWindowIDsByPID: [Int: Set<CGWindowID>] = [:]
+  /// App info per pid. A pid absent from this map returns `nil` (no
+  /// LaunchServices-registered app → windows kept).
+  var appInfoByPID: [Int: AppInfo] = [:]
 
   func fetchManagedDisplaySpaces() -> [[String: Any]] {
     displaySpaces
@@ -34,6 +38,10 @@ struct MockDataSource: SystemDataSource {
 
   func liveAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? {
     liveWindowIDsByPID[Int(pid)]
+  }
+
+  func appInfo(pid: pid_t) -> AppInfo? {
+    appInfoByPID[Int(pid)]
   }
 }
 
@@ -604,6 +612,99 @@ struct WindowFilteringTests {
     let ds = MockDataSource()
     let manager = SpaceManager(dataSource: ds)
     #expect(manager.getAllWindows().isEmpty)
+  }
+
+  @Test("Filters out windows of accessory- and prohibited-policy apps")
+  func accessoryAndProhibitedAppsExcluded() {
+    var ds = MockDataSource()
+    ds.windowList = [
+      makeWindowDict(id: 1, ownerName: "Editor", name: "Doc", pid: 100),
+      makeWindowDict(id: 2, ownerName: "MenuBarApp", name: "Panel", pid: 200),
+      makeWindowDict(id: 3, ownerName: "Agent", name: "Ghost", pid: 300),
+    ]
+    ds.windowSpaces = [1: [100], 2: [100], 3: [100]]
+    ds.appInfoByPID = [
+      100: AppInfo(policy: .regular, bundleID: "com.example.editor"),
+      200: AppInfo(policy: .accessory, bundleID: "com.example.menubar"),
+      300: AppInfo(policy: .prohibited, bundleID: nil),
+    ]
+
+    let manager = SpaceManager(dataSource: ds)
+    let windows = manager.getAllWindows()
+
+    #expect(windows.map(\.id) == [1])
+  }
+
+  @Test("Keeps windows whose pid the data source cannot resolve")
+  func unresolvedPIDKept() {
+    // The lookup must go through the data source, never the live system:
+    // a fabricated pid that happens to collide with a real accessory app
+    // on the host would otherwise silently drop the window.
+    var ds = MockDataSource()
+    ds.windowList = [
+      makeWindowDict(id: 1, ownerName: "App", name: "Main", pid: 400)
+    ]
+    ds.windowSpaces = [1: [100]]
+    ds.appInfoByPID = [:]
+
+    let manager = SpaceManager(dataSource: ds)
+    let windows = manager.getAllWindows()
+
+    #expect(windows.map(\.id) == [1])
+  }
+
+  @Test("Filters out windows of excluded bundle IDs")
+  func excludedBundleIDsFiltered() {
+    var ds = MockDataSource()
+    ds.windowList = [
+      makeWindowDict(id: 1, ownerName: "Wanted", name: "Doc", pid: 100),
+      makeWindowDict(id: 2, ownerName: "Unwanted", name: "Noise", pid: 200),
+    ]
+    ds.windowSpaces = [1: [100], 2: [100]]
+    ds.appInfoByPID = [
+      100: AppInfo(policy: .regular, bundleID: "com.example.wanted"),
+      200: AppInfo(policy: .regular, bundleID: "com.example.unwanted"),
+    ]
+
+    let manager = SpaceManager(dataSource: ds)
+    manager.excludedBundleIDs = ["com.example.unwanted"]
+    let windows = manager.getAllWindows()
+
+    #expect(windows.map(\.id) == [1])
+  }
+
+  @Test("Always keeps the current process's own windows")
+  func selfPIDAlwaysKept() {
+    let selfPID = Int(ProcessInfo.processInfo.processIdentifier)
+    var ds = MockDataSource()
+    ds.windowList = [
+      makeWindowDict(id: 1, ownerName: "Self", name: "Mine", pid: selfPID)
+    ]
+    ds.windowSpaces = [1: [100]]
+    ds.appInfoByPID = [selfPID: AppInfo(policy: .prohibited, bundleID: nil)]
+
+    let manager = SpaceManager(dataSource: ds)
+    let windows = manager.getAllWindows()
+
+    #expect(windows.map(\.id) == [1])
+  }
+
+  @Test("frontmostWindowID skips windows of accessory-policy apps")
+  func frontmostSkipsAccessoryApps() {
+    var ds = MockDataSource()
+    ds.windowList = [
+      makeWindowDict(id: 1, ownerName: "MenuBarApp", name: "Panel", pid: 200),
+      makeWindowDict(id: 2, ownerName: "Editor", name: "Doc", pid: 100),
+    ]
+    ds.windowSpaces = [1: [100], 2: [100]]
+    ds.appInfoByPID = [
+      100: AppInfo(policy: .regular, bundleID: "com.example.editor"),
+      200: AppInfo(policy: .accessory, bundleID: "com.example.menubar"),
+    ]
+
+    let manager = SpaceManager(dataSource: ds)
+
+    #expect(manager.frontmostWindowID(onSpace: 100) == 2)
   }
 }
 
