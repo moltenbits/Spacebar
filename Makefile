@@ -73,8 +73,8 @@ run.json: ## Build + run CLI (JSON output)
 	swift build $(DEBUG_FLAGS) --product spaceballs
 	swift run $(SWIFT_BUILD_FLAGS) spaceballs --json
 
-kill: ## Kill the running dev app
-	@pkill -INT -f "Spaceballs Dev.app" 2>/dev/null || true
+kill: ## Kill any running Spaceballs app (dev or release)
+	@pkill -INT -f "Spaceballs( Dev)?\.app/Contents/MacOS/spaceballs" 2>/dev/null || true
 	@sleep 1
 
 clean: ## Remove build artifacts
