@@ -7,17 +7,17 @@ import Foundation
 /// Every case except `.failed` means the window moved — the caller must not
 /// fall back to a Mission Control drag for any of them.
 enum DirectMoveVerification: Equatable {
-  /// CGS reports the target Space and the WindowServer frame matches the plan,
-  /// both held for the stability window. The normal outcome.
+  /// CGS reports the target Space and the WindowServer origin matches the
+  /// plan, both held for the stability window. The normal outcome.
   case verified
   /// The deadline passed without a stable hold, but the final fresh read shows
   /// the window on the target Space (frame still settling, or the app clamped it).
   case membershipLate
   /// The deadline passed with CGS still not publishing the target Space, but
-  /// the WindowServer frame is at the planned position on the target display —
+  /// the WindowServer origin is at the planned position on the target display —
   /// the window has physically relocated; membership is lagging.
   case frameOnly
-  /// Neither the Space nor the frame reached the target before the deadline.
+  /// Neither the Space nor the origin reached the target before the deadline.
   case failed(lastOnTarget: Bool, lastFrame: CGRect?)
 
   /// Whether the window provably moved (anything but `.failed`).
@@ -37,10 +37,10 @@ enum DirectMoveVerifier {
   static let sizeTolerance: CGFloat = 5
 
   /// Polls `isOnTargetSpace` and `currentFrame` every `pollInterval` until
-  /// both have agreed with the plan continuously for `stableDuration`
-  /// (`.verified`), or `deadline` passes. At the deadline one fresh read of
-  /// both decides: on the target Space → `.membershipLate`; frame at target →
-  /// `.frameOnly`; otherwise `.failed`. A drift off target during the hold
+  /// membership and the frame's origin have agreed with the plan continuously
+  /// for `stableDuration` (`.verified`), or `deadline` passes. At the deadline
+  /// one fresh read of both decides: on the target Space → `.membershipLate`;
+  /// origin at target → `.frameOnly`; otherwise `.failed`. A drift off target during the hold
   /// resets the stability timer (some apps report the target at once and keep
   /// animating).
   static func verify(
@@ -56,7 +56,7 @@ enum DirectMoveVerifier {
     var firstAtTarget: Date?
     while now() < deadline {
       let onTarget = isOnTargetSpace()
-      let atFrame = currentFrame().map { frameMatches($0, targetFrame) } ?? false
+      let atFrame = currentFrame().map { originMatches($0, targetFrame) } ?? false
       if onTarget && atFrame {
         let since = firstAtTarget ?? now()
         firstAtTarget = since
@@ -84,17 +84,25 @@ enum DirectMoveVerifier {
     let onTarget = isOnTargetSpace()
     let frame = currentFrame()
     if onTarget { return .membershipLate }
-    if let frame, frameMatches(frame, targetFrame) { return .frameOnly }
+    if let frame, originMatches(frame, targetFrame) { return .frameOnly }
     return .failed(lastOnTarget: onTarget, lastFrame: frame)
   }
 
-  /// Whether a WindowServer-reported frame is "at" the planned frame: origin
-  /// within 2pt and size within 5pt — the tolerances `WindowResizer` uses to
-  /// verify its own writes.
-  static func frameMatches(_ actual: CGRect, _ target: CGRect) -> Bool {
+  /// Whether a WindowServer-reported frame's origin is "at" the planned
+  /// origin (within 2pt). The move decision deliberately ignores size: AppKit
+  /// clamps a window that is larger than its new display, and some apps settle
+  /// their size separately — neither changes the fact that the window
+  /// relocated, and origin-on-the-target-display is what proves that.
+  static func originMatches(_ actual: CGRect, _ target: CGRect) -> Bool {
     abs(actual.minX - target.minX) < positionTolerance
       && abs(actual.minY - target.minY) < positionTolerance
-      && abs(actual.width - target.width) < sizeTolerance
+  }
+
+  /// Whether the size survived the move (within 5pt). Diagnostics only — the
+  /// direct path never writes size, so a change here means the app or AppKit
+  /// clamped it (typically an oversized window on a smaller display).
+  static func sizePreserved(_ actual: CGRect, _ target: CGRect) -> Bool {
+    abs(actual.width - target.width) < sizeTolerance
       && abs(actual.height - target.height) < sizeTolerance
   }
 }

@@ -2389,9 +2389,14 @@ public class SpaceManager {
       currentFrame: { windowBounds(forWindowID: request.windowID) })
     switch verification {
     case .verified, .membershipLate, .frameOnly:
+      let finalBounds = windowBounds(forWindowID: request.windowID)
+      let sizeNote = finalBounds.map {
+        DirectMoveVerifier.sizePreserved($0, request.targetFrame)
+          ? "size-preserved" : "size-changed-by-app:\(Int($0.width))x\(Int($0.height))"
+      } ?? "size-unknown"
       Diagnostics.log(
         "move-space",
-        "direct moved windowID=\(request.windowID) writeAccepted=\(writeAccepted) verification=\(verification) in \(Int(Date().timeIntervalSince(start) * 1000))ms"
+        "direct moved windowID=\(request.windowID) writeAccepted=\(writeAccepted) verification=\(verification) \(sizeNote) in \(Int(Date().timeIntervalSince(start) * 1000))ms"
       )
     case .failed(let lastOnTarget, let lastFrame):
       let write = writeAccepted ? "verify-timeout" : "ax-set-position-refused"

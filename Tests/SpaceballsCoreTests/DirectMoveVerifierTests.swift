@@ -105,6 +105,14 @@ struct DirectMoveVerifierTests {
     #expect(clock.elapsed > 0.1)
   }
 
+  @Test("Oversized window whose size the app clamps still verifies early (origin decides)")
+  func clampedSizeVerifiesEarly() {
+    let clamped = CGRect(x: target.minX, y: target.minY, width: 500, height: 300)
+    let (result, clock) = verify(onTarget: { _ in true }, frame: { _ in clamped })
+    #expect(result == .verified)
+    #expect(clock.elapsed < 0.1)
+  }
+
   @Test("Late but stable arrival verifies before the deadline")
   func lateArrivalVerifies() {
     let (result, clock) = verify(onTarget: { $0 >= 0.5 }, frame: { $0 >= 0.5 ? target : elsewhere })
@@ -118,26 +126,29 @@ struct DirectMoveVerifierTests {
 @Suite("Direct Move Verifier — frame tolerance")
 struct DirectMoveFrameToleranceTests {
 
-  @Test("Exact frame matches")
+  @Test("Exact frame matches origin and preserves size")
   func exact() {
-    #expect(DirectMoveVerifier.frameMatches(target, target))
+    #expect(DirectMoveVerifier.originMatches(target, target))
+    #expect(DirectMoveVerifier.sizePreserved(target, target))
   }
 
   @Test("Sub-tolerance drift in origin and size still matches")
   func withinTolerance() {
     let actual = CGRect(x: 1921, y: 26, width: 803, height: 597)
-    #expect(DirectMoveVerifier.frameMatches(actual, target))
+    #expect(DirectMoveVerifier.originMatches(actual, target))
+    #expect(DirectMoveVerifier.sizePreserved(actual, target))
   }
 
   @Test("Origin off by more than the tolerance does not match")
   func originOff() {
     let actual = CGRect(x: 1925, y: 25, width: 800, height: 600)
-    #expect(!DirectMoveVerifier.frameMatches(actual, target))
+    #expect(!DirectMoveVerifier.originMatches(actual, target))
   }
 
-  @Test("Size off by more than the tolerance does not match (the window was resized)")
-  func sizeOff() {
+  @Test("A size change (app clamped an oversized window) is reported but does not deny the move")
+  func sizeChangedStillMatchesOrigin() {
     let actual = CGRect(x: 1920, y: 25, width: 800, height: 590)
-    #expect(!DirectMoveVerifier.frameMatches(actual, target))
+    #expect(DirectMoveVerifier.originMatches(actual, target))
+    #expect(!DirectMoveVerifier.sizePreserved(actual, target))
   }
 }
