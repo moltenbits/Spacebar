@@ -97,6 +97,17 @@ public enum WindowResizer {
     return (windowRef as! AXUIElement, pid)
   }
 
+  /// The focused window of the frontmost application as a CGWindowID plus its
+  /// pid — exactly the target a resize-grid (Cmd+Shift+D) action would act on —
+  /// or nil when it can't be resolved. Used to verify focus after a direct
+  /// window move so that the next Cmd+Shift+D targets the moved window.
+  public static func focusedWindowID() -> (windowID: CGWindowID, pid: pid_t)? {
+    guard let focused = try? focusedWindow() else { return nil }
+    var windowID: CGWindowID = 0
+    guard _AXUIElementGetWindow(focused.element, &windowID) == .success else { return nil }
+    return (windowID, focused.pid)
+  }
+
   // MARK: - Screen Detection
 
   /// Returns the NSScreen that contains the given AX window element.
