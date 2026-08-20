@@ -51,6 +51,17 @@ struct GeneralPane: View {
         .foregroundStyle(.secondary)
       }
 
+      Section {
+        Toggle(
+          "Capture input from remote-control apps",
+          isOn: $settings.captureRemoteInput)
+        Text(
+          "Lets shortcuts work when this Mac is controlled remotely (Jump Desktop, Screen Sharing, VNC). Remote apps inject keyboard events at a level the standard listener can't see; this switches to a session-level listener that sees both. Turn off if shortcuts misbehave."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+
       Section("Import & Export") {
         HStack(spacing: 12) {
           Button("Export Settings...") {

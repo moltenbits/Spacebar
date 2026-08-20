@@ -92,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     keyInterceptor = KeyInterceptor()
     keyInterceptor.delegate = self
     keyInterceptor.keyBindings = appSettings.keyBindings
+    keyInterceptor.tapLocation = appSettings.eventTapLocation
     keyInterceptor.start()
 
     // Check permissions at launch and prompt for anything missing. Re-checked on
@@ -133,6 +134,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       .dropFirst()
       .sink { [weak self] recording in
         self?.keyInterceptor.setRecordingMode(recording)
+      }
+      .store(in: &cancellables)
+
+    appSettings.$captureRemoteInput
+      .dropFirst()
+      .sink { [weak self] capture in
+        self?.keyInterceptor.updateTapLocation(
+          capture ? .cgSessionEventTap : .cghidEventTap)
       }
       .store(in: &cancellables)
 

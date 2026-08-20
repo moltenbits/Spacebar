@@ -67,6 +67,12 @@ final class KeyInterceptor {
   private(set) var restoring = false
   var suppressConfirm = false
   var keyBindings = KeyBindings()
+  /// Where the tap listens. HID level (default) sees hardware input only;
+  /// session level also sees synthetic keyboard events injected by
+  /// remote-control apps (Jump Desktop, Screen Sharing), which enter the
+  /// event stream below the HID tap point. Set before start(); use
+  /// updateTapLocation(_:) to change it on a running tap.
+  var tapLocation: CGEventTapLocation = .cghidEventTap
 
   func setPanelVisible(_ visible: Bool) {
     panelVisible = visible
@@ -147,7 +153,7 @@ final class KeyInterceptor {
     // We pass `self` via userInfo.
     guard
       let tap = CGEvent.tapCreate(
-        tap: .cghidEventTap,
+        tap: tapLocation,
         place: .headInsertEventTap,
         options: .defaultTap,
         eventsOfInterest: eventMask,
@@ -169,8 +175,17 @@ final class KeyInterceptor {
     CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
     installSignalHandlers()
-    print("Event tap active — Cmd+Tab interception enabled.")
+    let level = tapLocation == .cgSessionEventTap ? "session" : "HID"
+    print("Event tap active (\(level) level) — Cmd+Tab interception enabled.")
     delegate?.keyInterceptorReady()
+  }
+
+  /// Tear down and recreate the tap at a new location (no-op if unchanged).
+  func updateTapLocation(_ location: CGEventTapLocation) {
+    guard location != tapLocation else { return }
+    tapLocation = location
+    stop()
+    start()
   }
 
   func stop() {
@@ -229,7 +244,9 @@ private func keyInterceptorCallback(
   }
 
   // Restoring mode — consume Cmd+Tab (and related shortcuts) to prevent
-  // both Spaceballs and macOS app switcher from activating during restore
+  // both Spaceballs and macOS app switcher from activating during restore.
+  // Deliberately a superset match: this branch suppresses, never triggers,
+  // so Cmd+Shift+Tab (the reverse app switcher) must be caught too.
   if interceptor.restoring {
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let flags = event.flags
@@ -245,7 +262,11 @@ private func keyInterceptorCallback(
 
   switch type {
   case .keyDown:
-    let cmdHeld = flags.contains(.maskCommand)
+    // Shortcuts match modifiers exactly (see ShortcutModifiers): Cmd+Opt+W
+    // must not fire the Cmd+W shortcut, matching platform convention.
+    let mods = flags.shortcutModifiers
+    let cmdExact = flags.isExactlyCommand
+    let cmdShiftExact = flags.isExactlyCommandShift
 
     // Rename mode — most keys pass through to the TextField
     if interceptor.renameMode {
@@ -263,24 +284,29 @@ private func keyInterceptorCallback(
         }
         return nil  // consume
       }
-      // Activate key — commit rename, then move down
-      if cmdHeld && keyCode == Int64(bindings.activateAndNext) {
+      // Activate key — commit rename, then move down (Shift: up)
+      if (cmdExact || cmdShiftExact) && keyCode == Int64(bindings.activateAndNext) {
         DispatchQueue.main.async {
           interceptor.delegate?.keyInterceptorCommitRename()
-          interceptor.delegate?.keyInterceptorMoveDown()
+          if cmdShiftExact {
+            interceptor.delegate?.keyInterceptorMoveUp()
+          } else {
+            interceptor.delegate?.keyInterceptorMoveDown()
+          }
         }
         return nil  // consume
       }
       // Previous item key — commit rename, then move up
-      if cmdHeld && keyCode == Int64(bindings.previousItem) {
+      if cmdExact && keyCode == Int64(bindings.previousItem) {
         DispatchQueue.main.async {
           interceptor.delegate?.keyInterceptorCommitRename()
           interceptor.delegate?.keyInterceptorMoveUp()
         }
         return nil  // consume
       }
-      // Close / Quit / next-space / prev-space — no-op during rename
-      if cmdHeld
+      // Close / Quit / next-space / prev-space — no-op during rename.
+      // Superset match on Cmd: this suppresses, never triggers.
+      if mods.contains(.maskCommand)
         && (keyCode == Int64(bindings.closeWindow) || keyCode == Int64(bindings.quitApp)
           || keyCode == Int64(bindings.nextSpace)
           || keyCode == Int64(bindings.previousSpace))
@@ -292,7 +318,7 @@ private func keyInterceptorCallback(
     }
 
     // Cmd+Shift+D — toggle resize grid panel (fires globally, independent of switcher panel)
-    if cmdHeld && flags.contains(.maskShift) && keyCode == Int64(bindings.showResize) {
+    if cmdShiftExact && keyCode == Int64(bindings.showResize) {
       DispatchQueue.main.async {
         if interceptor.resizePanelVisible {
           interceptor.delegate?.keyInterceptorResizeCancel()
@@ -324,12 +350,18 @@ private func keyInterceptorCallback(
       return nil  // consume
     }
 
-    // Activate / Next item
-    if cmdHeld && keyCode == Int64(bindings.activateAndNext) {
+    // Activate / Next item (Shift reverses, like the native app switcher)
+    if (cmdExact || cmdShiftExact) && keyCode == Int64(bindings.activateAndNext) {
       DispatchQueue.main.async {
         if !interceptor.panelVisible {
           interceptor.delegate?.keyInterceptorShowPanel()
-          interceptor.delegate?.keyInterceptorAdvanceAfterOpen()
+          if cmdShiftExact {
+            interceptor.delegate?.keyInterceptorMoveUp()
+          } else {
+            interceptor.delegate?.keyInterceptorAdvanceAfterOpen()
+          }
+        } else if cmdShiftExact {
+          interceptor.delegate?.keyInterceptorMoveUp()
         } else {
           interceptor.delegate?.keyInterceptorMoveDown()
         }
@@ -338,7 +370,7 @@ private func keyInterceptorCallback(
     }
 
     // Previous item
-    if cmdHeld && keyCode == Int64(bindings.previousItem) {
+    if cmdExact && keyCode == Int64(bindings.previousItem) {
       DispatchQueue.main.async {
         if interceptor.panelVisible {
           interceptor.delegate?.keyInterceptorMoveUp()
@@ -348,7 +380,7 @@ private func keyInterceptorCallback(
     }
 
     // Cmd+Enter/Return — confirm selection (same as releasing Cmd)
-    if cmdHeld && (keyCode == 36 || keyCode == 76) && interceptor.panelVisible {
+    if cmdExact && (keyCode == 36 || keyCode == 76) && interceptor.panelVisible {
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorConfirm()
       }
@@ -356,9 +388,9 @@ private func keyInterceptorCallback(
     }
 
     // Navigation keys (Cmd held) — plain moves by space, Shift moves by display
-    if cmdHeld && interceptor.panelVisible,
+    if (cmdExact || cmdShiftExact) && interceptor.panelVisible,
       let command = bindings.navigationCommand(
-        keyCode: UInt16(keyCode), shiftHeld: flags.contains(.maskShift))
+        keyCode: UInt16(keyCode), shiftHeld: cmdShiftExact)
     {
       DispatchQueue.main.async {
         dispatchNavigation(command, to: interceptor.delegate)
@@ -368,9 +400,9 @@ private func keyInterceptorCallback(
 
     // Arrow keys (no Cmd) — same scheme, always on the physical arrows
     // (the panel can outlive the Cmd hold after a suppressed confirm)
-    if !cmdHeld && interceptor.panelVisible,
+    if (mods == [] || mods == .maskShift) && interceptor.panelVisible,
       let command = KeyBindings().navigationCommand(
-        keyCode: UInt16(keyCode), shiftHeld: flags.contains(.maskShift))
+        keyCode: UInt16(keyCode), shiftHeld: mods == .maskShift)
     {
       DispatchQueue.main.async {
         dispatchNavigation(command, to: interceptor.delegate)
@@ -379,7 +411,7 @@ private func keyInterceptorCallback(
     }
 
     // Rename space
-    if cmdHeld && keyCode == Int64(bindings.renameSpace) && interceptor.panelVisible {
+    if cmdExact && keyCode == Int64(bindings.renameSpace) && interceptor.panelVisible {
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorStartRename()
       }
@@ -387,8 +419,10 @@ private func keyInterceptorCallback(
     }
 
     // Close window (Cmd+W) or close space (Cmd+Shift+W)
-    if cmdHeld && keyCode == Int64(bindings.closeWindow) && interceptor.panelVisible {
-      if flags.contains(.maskShift) {
+    if (cmdExact || cmdShiftExact) && keyCode == Int64(bindings.closeWindow)
+      && interceptor.panelVisible
+    {
+      if cmdShiftExact {
         DispatchQueue.main.async {
           interceptor.delegate?.keyInterceptorCloseSpace()
         }
@@ -401,7 +435,7 @@ private func keyInterceptorCallback(
     }
 
     // Quit app
-    if cmdHeld && keyCode == Int64(bindings.quitApp) && interceptor.panelVisible {
+    if cmdExact && keyCode == Int64(bindings.quitApp) && interceptor.panelVisible {
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorQuitApp()
       }
@@ -409,7 +443,7 @@ private func keyInterceptorCallback(
     }
 
     // Cycle sort order
-    if cmdHeld && keyCode == Int64(bindings.cycleSortOrder) && interceptor.panelVisible {
+    if cmdExact && keyCode == Int64(bindings.cycleSortOrder) && interceptor.panelVisible {
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorCycleSortOrder()
       }
@@ -417,8 +451,10 @@ private func keyInterceptorCallback(
     }
 
     // Move window to another space (Cmd+M) or space to another display (Cmd+Shift+M)
-    if cmdHeld && keyCode == Int64(bindings.moveWindow) && interceptor.panelVisible {
-      if flags.contains(.maskShift) {
+    if (cmdExact || cmdShiftExact) && keyCode == Int64(bindings.moveWindow)
+      && interceptor.panelVisible
+    {
+      if cmdShiftExact {
         DispatchQueue.main.async {
           interceptor.delegate?.keyInterceptorToggleSpaceMoveMode()
         }
@@ -431,8 +467,10 @@ private func keyInterceptorCallback(
     }
 
     // Eject Spaces to the built-in display (Shift restores them)
-    if cmdHeld && keyCode == Int64(bindings.ejectSpaces) && interceptor.panelVisible {
-      if flags.contains(.maskShift) {
+    if (cmdExact || cmdShiftExact) && keyCode == Int64(bindings.ejectSpaces)
+      && interceptor.panelVisible
+    {
+      if cmdShiftExact {
         DispatchQueue.main.async {
           interceptor.delegate?.keyInterceptorRestoreSpaces()
         }
@@ -445,7 +483,7 @@ private func keyInterceptorCallback(
     }
 
     // Toggle create space menu
-    if cmdHeld && keyCode == Int64(bindings.createSpace) && interceptor.panelVisible {
+    if cmdExact && keyCode == Int64(bindings.createSpace) && interceptor.panelVisible {
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorToggleCreateMenu()
       }
@@ -453,14 +491,15 @@ private func keyInterceptorCallback(
     }
 
     // Cmd+Comma (keyCode 43) — open settings
-    if cmdHeld && keyCode == 43 && interceptor.panelVisible {
+    if cmdExact && keyCode == 43 && interceptor.panelVisible {
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorOpenSettings()
       }
       return nil  // consume
     }
 
-    // Cancel
+    // Cancel — modifier-agnostic: Cmd is normally still held while the
+    // panel is open, and Escape should dismiss regardless
     if keyCode == Int64(bindings.cancel) && interceptor.panelVisible {
       DispatchQueue.main.async {
         interceptor.delegate?.keyInterceptorCancel()

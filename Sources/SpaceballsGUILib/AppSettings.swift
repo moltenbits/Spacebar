@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import SpaceballsCore
 
@@ -207,6 +208,24 @@ public final class AppSettings: ObservableObject {
       interDragPause: timingBetweenDrags)
   }
 
+  // MARK: - Remote Input Capture
+
+  /// When on (default off), the keyboard event tap listens at session level
+  /// (`.cgSessionEventTap`) instead of HID level, so it also sees synthetic
+  /// keyboard events injected by remote-control apps (Jump Desktop, Screen
+  /// Sharing, VNC) — those enter the event stream below the HID tap point
+  /// and are invisible to the default tap. Off by default: HID level is the
+  /// long-verified configuration, and session level changes where Spaceballs
+  /// sits relative to other apps' taps.
+  @Published public var captureRemoteInput: Bool {
+    didSet { defaults.set(captureRemoteInput, forKey: "captureRemoteInput") }
+  }
+
+  /// The tap point the keyboard interceptor should use.
+  public var eventTapLocation: CGEventTapLocation {
+    captureRemoteInput ? .cgSessionEventTap : .cghidEventTap
+  }
+
   // MARK: - Diagnostics
 
   /// Master switch. When off, `Diagnostics.log(...)` calls are no-ops. Default off.
@@ -246,6 +265,7 @@ public final class AppSettings: ObservableObject {
       "rememberWindowLayouts": true,
       "warpCursorOnActivation": false,
       "activateMovedItem": true,
+      "captureRemoteInput": false,
       "timingSpaceSwitchSettle": 0.25,
       "timingDropSettle": 0.2,
       "timingBetweenDrags": 0.15,
@@ -265,6 +285,7 @@ public final class AppSettings: ObservableObject {
       SpaceSortOrder(rawValue: defaults.string(forKey: "spaceSortOrder") ?? "") ?? .mru
     self.warpCursorOnActivation = defaults.bool(forKey: "warpCursorOnActivation")
     self.activateMovedItem = defaults.bool(forKey: "activateMovedItem")
+    self.captureRemoteInput = defaults.bool(forKey: "captureRemoteInput")
     self.timingSpaceSwitchSettle = defaults.double(forKey: "timingSpaceSwitchSettle")
     self.timingDropSettle = defaults.double(forKey: "timingDropSettle")
     self.timingBetweenDrags = defaults.double(forKey: "timingBetweenDrags")
