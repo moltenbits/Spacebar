@@ -28,10 +28,12 @@ struct DirectWindowMoveRequest: Equatable {
 }
 
 enum DirectWindowMoveResult: Equatable {
-  /// The window is on the target Space. `focused` is nil when activation was
-  /// not requested, otherwise whether the moved window verified as the
-  /// system-wide focused window.
-  case moved(focused: Bool?)
+  /// The window moved. `focused` is nil when activation was not requested,
+  /// otherwise whether the moved window verified as the window a Cmd+Shift+D
+  /// resize would target. `membershipVerified` is false when only the
+  /// WindowServer frame proved the move (CGS membership still lagging at the
+  /// deadline).
+  case moved(focused: Bool?, membershipVerified: Bool = true)
   /// The window did not provably move; `reason` is a diagnostics token.
   case failed(reason: String)
 }
@@ -41,6 +43,5 @@ struct MissionControlWindowMoveRequest {
   let windowTitle: String
   let targetSpace: SpaceInfo
   let allSpaces: [SpaceInfo]
-  let sourceSpaceIDs: [UInt64]
   let activateAfterMove: Bool
 }

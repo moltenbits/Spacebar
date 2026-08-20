@@ -120,7 +120,6 @@ struct WindowMoveRoutingTests {
     #expect(request.windowID == windowID)
     #expect(request.windowTitle == "Doc.txt")
     #expect(request.targetSpace.id == 3)
-    #expect(request.sourceSpaceIDs == [1])
     #expect(request.activateAfterMove)
   }
 
@@ -139,6 +138,18 @@ struct WindowMoveRoutingTests {
     executor.directResult = .moved(focused: false)
 
     let moved = try manager.moveWindowToSpace(windowID: windowID, targetSpaceID: 3)
+
+    #expect(moved)
+    #expect(executor.order == ["direct"])
+  }
+
+  @Test("A frame-only verified direct move (membership lagging) never drags either")
+  func noFallbackAfterFrameOnlyVerification() throws {
+    let (manager, executor) = makeManager()
+    executor.directResult = .moved(focused: nil, membershipVerified: false)
+
+    let moved = try manager.moveWindowToSpace(
+      windowID: windowID, targetSpaceID: 3, activateAfterMove: false)
 
     #expect(moved)
     #expect(executor.order == ["direct"])
@@ -206,35 +217,5 @@ struct WindowMoveRoutingTests {
 
     #expect(try manager.moveWindowToSpace(windowID: windowID, targetSpaceID: 999) == false)
     #expect(executor.order.isEmpty)
-  }
-}
-
-// MARK: - Direct-move verification helpers
-
-@Suite("Direct Window Move — frame tolerance")
-struct DirectWindowMoveFrameToleranceTests {
-  private let target = CGRect(x: 1920, y: 25, width: 800, height: 600)
-
-  @Test("Exact frame matches")
-  func exact() {
-    #expect(SpaceManager.directMoveFrameMatches(target, target))
-  }
-
-  @Test("Sub-tolerance drift in origin and size still matches")
-  func withinTolerance() {
-    let actual = CGRect(x: 1921, y: 26, width: 803, height: 597)
-    #expect(SpaceManager.directMoveFrameMatches(actual, target))
-  }
-
-  @Test("Origin off by more than the tolerance does not match")
-  func originOff() {
-    let actual = CGRect(x: 1925, y: 25, width: 800, height: 600)
-    #expect(!SpaceManager.directMoveFrameMatches(actual, target))
-  }
-
-  @Test("Size off by more than the tolerance does not match (the window was resized)")
-  func sizeOff() {
-    let actual = CGRect(x: 1920, y: 25, width: 800, height: 590)
-    #expect(!SpaceManager.directMoveFrameMatches(actual, target))
   }
 }

@@ -2209,41 +2209,49 @@ public class SpaceManager {
       windowBounds: Self.windowBounds(in: entry),
       windowIsOnscreen: entry[kCGWindowIsOnscreen as String] as? Bool ?? false,
       displayVisibleFrames: displayVisibleFramesProvider())
+    var directFallbackReason: String?
     switch route {
     case .direct(let targetFrame):
-      if let rawPID = entry[kCGWindowOwnerPID as String] as? Int {
-        Diagnostics.log(
-          "move-space",
-          "route=direct title=\(Diagnostics.titleForLogging(windowTitle)) → space \(targetSpaceID) frame=\(Self.frameString(targetFrame))"
-        )
-        let result = executor.performDirectWindowMove(
-          DirectWindowMoveRequest(
-            windowID: windowID, pid: pid_t(rawPID), targetSpaceID: targetSpaceID,
-            targetFrame: targetFrame, activateAfterMove: activateAfterMove,
-            deadline: directMoveDeadline))
-        switch result {
-        case .moved(let focused):
-          Diagnostics.endTiming(
-            token, outcome: focused == false ? "direct-focus-unverified" : "direct")
-          return true
-        case .failed(let reason):
-          // The window did not provably move, so the drag is still safe to run.
-          Diagnostics.log("move-space", "direct-fallback:\(reason) — using Mission Control")
-        }
-      } else {
-        Diagnostics.log("move-space", "direct-fallback:pid-unknown — using Mission Control")
+      guard let rawPID = entry[kCGWindowOwnerPID as String] as? Int else {
+        directFallbackReason = "pid-unknown"
+        break
+      }
+      Diagnostics.log(
+        "move-space",
+        "route=direct title=\(Diagnostics.titleForLogging(windowTitle)) → space \(targetSpaceID) frame=\(Self.frameString(targetFrame))"
+      )
+      let result = executor.performDirectWindowMove(
+        DirectWindowMoveRequest(
+          windowID: windowID, pid: pid_t(rawPID), targetSpaceID: targetSpaceID,
+          targetFrame: targetFrame, activateAfterMove: activateAfterMove,
+          deadline: directMoveDeadline))
+      switch result {
+      case .moved(let focused, let membershipVerified):
+        var outcome = "direct"
+        if !membershipVerified { outcome += "-membership-unverified" }
+        if focused == false { outcome += "-focus-unverified" }
+        Diagnostics.endTiming(token, outcome: outcome)
+        return true
+      case .failed(let reason):
+        // The window did not provably move, so the drag is still safe to run.
+        directFallbackReason = reason
       }
     case .missionControl(let reason):
       Diagnostics.log("move-space", "route=mission-control reason=\(reason)")
+    }
+    if let directFallbackReason {
+      Diagnostics.log(
+        "move-space", "direct-fallback:\(directFallbackReason) — using Mission Control")
     }
 
     // 4. Mission Control drag.
     let moved = try executor.performMissionControlWindowMove(
       MissionControlWindowMoveRequest(
         windowID: windowID, windowTitle: windowTitle, targetSpace: targetSpace,
-        allSpaces: allSpaces, sourceSpaceIDs: sourceSpaceIDs,
-        activateAfterMove: activateAfterMove))
-    Diagnostics.endTiming(token, outcome: moved ? "moved" : "drag-failed")
+        allSpaces: allSpaces, activateAfterMove: activateAfterMove))
+    let fallbackPrefix = directFallbackReason.map { "direct-fallback:\($0):" } ?? ""
+    Diagnostics.endTiming(
+      token, outcome: "\(fallbackPrefix)mc-drag:\(moved ? "moved" : "failed")")
     return moved
   }
 
@@ -2278,7 +2286,7 @@ public class SpaceManager {
     // When the window is already on a current Space there is no space-switch
     // animation to wait out — only a brief settle for the activation itself.
     let currentSpaceIDs = Set(allSpaces.filter(\.isCurrent).map(\.id))
-    let sourceSpaceIDs = request.sourceSpaceIDs
+    let sourceSpaceIDs = dataSource.fetchSpacesForWindow(windowID)
     let needsSpaceSwitch = !sourceSpaceIDs.contains(where: { currentSpaceIDs.contains($0) })
     let sourceSpace = allSpaces.first(where: { sourceSpaceIDs.contains($0.id) })
 
@@ -2332,9 +2340,10 @@ public class SpaceManager {
   /// Moves the window by writing its AX position, then verifies through CGS
   /// that WindowServer reassigned it to the target Space — what a manual
   /// cross-display drag does — and that the frame landed where planned with
-  /// its size intact. Only then, and only if asked, is the window activated,
-  /// with focus verified as a hard postcondition so a bare Cmd+Shift+D
-  /// afterwards targets the moved window on its new display. Everything shares
+  /// its size intact (`DirectMoveVerifier`). Only then, and only if asked, is
+  /// the window activated, with focus verified as a hard postcondition through
+  /// the exact oracle the resize grid uses, so a bare Cmd+Shift+D afterwards
+  /// targets the moved window on its new display. Everything shares
   /// `request.deadline`; `.failed` is returned only while the window has not
   /// provably moved, so the caller can still fall back to Mission Control.
   func performDirectWindowMove(_ request: DirectWindowMoveRequest) -> DirectWindowMoveResult {
@@ -2357,60 +2366,42 @@ public class SpaceManager {
       return .failed(reason: "ax-set-position-refused")
     }
 
-    // Verify: on the target Space AND at the target frame, holding for a short
-    // stable window — some apps report the target at once and keep animating.
-    let stableDuration: TimeInterval = 0.06
-    let pollInterval: TimeInterval = 0.025
-    var firstAtTarget: Date?
-    var verified = false
-    var lastMember = false
-    var lastBounds: CGRect?
-    while Date() < deadline {
-      lastMember = dataSource.fetchSpacesForWindow(request.windowID)
-        .contains(request.targetSpaceID)
-      lastBounds = windowBounds(forWindowID: request.windowID)
-      let atFrame = lastBounds.map { Self.directMoveFrameMatches($0, request.targetFrame) } ?? false
-      if lastMember && atFrame {
-        let since = firstAtTarget ?? Date()
-        firstAtTarget = since
-        if Date().timeIntervalSince(since) >= stableDuration {
-          verified = true
-          break
-        }
-      } else {
-        firstAtTarget = nil
-      }
-      Thread.sleep(forTimeInterval: pollInterval)
+    let verification = DirectMoveVerifier.verify(
+      targetFrame: request.targetFrame, deadline: deadline,
+      isOnTargetSpace: {
+        dataSource.fetchSpacesForWindow(request.windowID).contains(request.targetSpaceID)
+      },
+      currentFrame: { windowBounds(forWindowID: request.windowID) })
+    switch verification {
+    case .verified, .membershipLate, .frameOnly:
+      Diagnostics.log(
+        "move-space",
+        "direct moved windowID=\(request.windowID) verification=\(verification) in \(Int(Date().timeIntervalSince(start) * 1000))ms"
+      )
+    case .failed(let lastOnTarget, let lastFrame):
+      return .failed(
+        reason:
+          "verify-timeout member=\(lastOnTarget) frame=\(lastFrame.map(Self.frameString) ?? "?")"
+      )
     }
-    if !verified {
-      // Race guard: membership can flip right at the deadline. A window that is
-      // on the target Space has moved — dragging it again would be the bug.
-      if dataSource.fetchSpacesForWindow(request.windowID).contains(request.targetSpaceID) {
-        Diagnostics.log(
-          "move-space",
-          "direct verified late at deadline frame=\(lastBounds.map(Self.frameString) ?? "?")")
-      } else {
-        return .failed(
-          reason:
-            "verify-timeout member=\(lastMember) frame=\(lastBounds.map(Self.frameString) ?? "?")"
-        )
-      }
-    }
-    Diagnostics.log(
-      "move-space",
-      "direct moved windowID=\(request.windowID) in \(Int(Date().timeIntervalSince(start) * 1000))ms"
-    )
+    let membershipVerified = verification != .frameOnly
 
-    guard request.activateAfterMove else { return .moved(focused: nil) }
-    return .moved(focused: activateAndVerifyFocus(windowID: request.windowID, pid: request.pid))
+    guard request.activateAfterMove else {
+      return .moved(focused: nil, membershipVerified: membershipVerified)
+    }
+    let focused = activateAndVerifyFocus(windowID: request.windowID, pid: request.pid)
+    return .moved(focused: focused, membershipVerified: membershipVerified)
   }
 
-  /// Activates the window and verifies it became the system-wide focused
-  /// window (AX focused application → focused window → CGWindowID), retrying
-  /// the activation once. Returns whether focus was verified; the move itself
-  /// is already done either way.
+  /// Activates the window and verifies it became the window a resize-grid
+  /// action would target — `WindowResizer.focusedWindowID()`: the frontmost
+  /// application (NSWorkspace) must be the window's process and that app's AX
+  /// focused window must be this CGWindowID — retrying the activation once.
+  /// Returns whether focus was verified; the move itself is already done
+  /// either way.
   private func activateAndVerifyFocus(windowID: Int, pid: pid_t) -> Bool {
     let attemptBudget: TimeInterval = 0.3
+    let expected = CGWindowID(windowID)
     for attempt in 1...2 {
       do {
         try activateWindow(id: windowID)
@@ -2421,52 +2412,21 @@ public class SpaceManager {
       }
       let attemptDeadline = Date().addingTimeInterval(attemptBudget)
       while Date() < attemptDeadline {
-        if Self.systemFocusedWindowID() == CGWindowID(windowID) {
+        if let focused = WindowResizer.focusedWindowID(), focused.pid == pid,
+          focused.windowID == expected
+        {
           Diagnostics.log("move-space", "direct focus verified attempt=\(attempt)")
           return true
         }
         Thread.sleep(forTimeInterval: 0.025)
       }
     }
+    let focused = WindowResizer.focusedWindowID()
     Diagnostics.log(
       "move-space",
-      "direct focus unverified windowID=\(windowID) focused=\(Self.systemFocusedWindowID().map { "\($0)" } ?? "none")"
+      "direct focus unverified windowID=\(windowID) pid=\(pid) focused=\(focused.map { "\($0.windowID)@\($0.pid)" } ?? "none")"
     )
     return false
-  }
-
-  /// CGWindowID of the focused window of the system-wide focused application —
-  /// the window the resize grid would pick up (`WindowResizer.focusedWindow`).
-  static func systemFocusedWindowID() -> CGWindowID? {
-    var appRef: CFTypeRef?
-    guard
-      AXUIElementCopyAttributeValue(
-        AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &appRef)
-        == .success,
-      let appRef
-    else { return nil }
-    // swiftlint:disable:next force_cast
-    let app = appRef as! AXUIElement
-    var windowRef: CFTypeRef?
-    guard
-      AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &windowRef)
-        == .success,
-      let windowRef
-    else { return nil }
-    var cgWindowID: CGWindowID = 0
-    // swiftlint:disable:next force_cast
-    guard _AXUIElementGetWindow(windowRef as! AXUIElement, &cgWindowID) == .success else {
-      return nil
-    }
-    return cgWindowID
-  }
-
-  /// Whether a WindowServer-reported frame is "at" the planned direct-move
-  /// frame: origin within 2pt and size within 5pt — the tolerances
-  /// `WindowResizer` uses to verify its own writes.
-  static func directMoveFrameMatches(_ actual: CGRect, _ target: CGRect) -> Bool {
-    abs(actual.minX - target.minX) < 2 && abs(actual.minY - target.minY) < 2
-      && abs(actual.width - target.width) < 5 && abs(actual.height - target.height) < 5
   }
 
   /// Visible frame (menu bar and Dock excluded) of every display in global CG
