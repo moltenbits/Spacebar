@@ -119,7 +119,7 @@ struct WindowMoveRoutingTests {
     let request = try #require(executor.missionControlRequests.first)
     #expect(request.windowID == windowID)
     #expect(request.windowTitle == "Doc.txt")
-    #expect(request.targetSpace.id == 3)
+    #expect(request.targetSpaceID == 3)
     #expect(request.activateAfterMove)
   }
 

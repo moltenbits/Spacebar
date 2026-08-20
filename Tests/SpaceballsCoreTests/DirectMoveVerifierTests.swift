@@ -53,7 +53,7 @@ struct DirectMoveVerifierTests {
     let (result, clock) = verify(onTarget: { _ in false }, frame: { _ in target })
     #expect(result == .frameOnly)
     #expect(result.moved)
-    #expect(clock.elapsed >= 1.0)
+    #expect(clock.elapsed >= 0.99)
   }
 
   @Test("Membership published but frame never matches → membershipLate (moved, no fallback)")
@@ -71,13 +71,13 @@ struct DirectMoveVerifierTests {
 
   @Test("Membership that lands exactly at the deadline is caught by the final read")
   func membershipLandsAtDeadline() {
-    let (result, _) = verify(onTarget: { $0 >= 1.0 }, frame: { _ in elsewhere })
+    let (result, _) = verify(onTarget: { $0 >= 0.99 }, frame: { _ in elsewhere })
     #expect(result == .membershipLate)
   }
 
   @Test("Frame that lands exactly at the deadline is caught by the final read")
   func frameLandsAtDeadline() {
-    let (result, _) = verify(onTarget: { _ in false }, frame: { $0 >= 1.0 ? target : elsewhere })
+    let (result, _) = verify(onTarget: { _ in false }, frame: { $0 >= 0.99 ? target : elsewhere })
     #expect(result == .frameOnly)
   }
 

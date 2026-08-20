@@ -2194,7 +2194,7 @@ public class SpaceManager {
 
     // 2. Resolve the target Space.
     let allSpaces = getAllSpaces()
-    guard let targetSpace = allSpaces.first(where: { $0.id == targetSpaceID }) else {
+    guard allSpaces.contains(where: { $0.id == targetSpaceID }) else {
       Diagnostics.endTiming(token, outcome: "target-space-not-found")
       print("moveWindowToSpace: space \(targetSpaceID) not found")
       return false
@@ -2247,8 +2247,8 @@ public class SpaceManager {
     // 4. Mission Control drag.
     let moved = try executor.performMissionControlWindowMove(
       MissionControlWindowMoveRequest(
-        windowID: windowID, windowTitle: windowTitle, targetSpace: targetSpace,
-        allSpaces: allSpaces, activateAfterMove: activateAfterMove))
+        windowID: windowID, windowTitle: windowTitle, targetSpaceID: targetSpaceID,
+        activateAfterMove: activateAfterMove))
     let fallbackPrefix = directFallbackReason.map { "direct-fallback:\($0):" } ?? ""
     Diagnostics.endTiming(
       token, outcome: "\(fallbackPrefix)mc-drag:\(moved ? "moved" : "failed")")
@@ -2263,9 +2263,15 @@ public class SpaceManager {
     _ request: MissionControlWindowMoveRequest
   ) throws -> Bool {
     let windowID = request.windowID
-    let targetSpace = request.targetSpace
-    let allSpaces = request.allSpaces
     let activateAfterMove = request.activateAfterMove
+    // A failed direct attempt may have spent up to a second; plan the drag
+    // from a fresh Spaces snapshot, not the one routing used.
+    let allSpaces = getAllSpaces()
+    guard let targetSpace = allSpaces.first(where: { $0.id == request.targetSpaceID }) else {
+      Diagnostics.log("move-space", "target space \(request.targetSpaceID) vanished before drag")
+      print("moveWindowToSpace: space \(request.targetSpaceID) not found")
+      return false
+    }
 
     // 1. Resolve the target space's "Desktop N" label (what MC shows).
     //    MC uses global numbering across all displays, not per-display ordinals.
@@ -2337,6 +2343,16 @@ public class SpaceManager {
 
   // MARK: - Direct Window Move (both Spaces visible)
 
+  /// Live AX primitives for the direct move; tests substitute scripted ones.
+  lazy var directMoveAXHooks = DirectMoveAXHooks(
+    isAccessibilityTrusted: { Self.ensureAccessibilityTrusted() },
+    setPosition: { [unowned self] pid, windowID, origin in
+      self.liveSetAXPosition(pid: pid, windowID: windowID, origin: origin)
+    },
+    activateAndVerifyFocus: { [unowned self] windowID, pid in
+      self.activateAndVerifyFocus(windowID: windowID, pid: pid)
+    })
+
   /// Moves the window by writing its AX position, then verifies through CGS
   /// that WindowServer reassigned it to the target Space — what a manual
   /// cross-display drag does — and that the frame landed where planned with
@@ -2349,23 +2365,22 @@ public class SpaceManager {
   func performDirectWindowMove(_ request: DirectWindowMoveRequest) -> DirectWindowMoveResult {
     let start = Date()
     let deadline = start.addingTimeInterval(request.deadline)
-    let cgWindowID = CGWindowID(request.windowID)
+    let hooks = directMoveAXHooks
 
-    guard Self.ensureAccessibilityTrusted() else {
+    guard hooks.isAccessibilityTrusted() else {
       return .failed(reason: "ax-not-trusted")
     }
     guard
-      let element = findAXWindowStandard(pid: request.pid, targetCGWindowID: cgWindowID)
-        ?? findAXWindowBruteForceResult(
-          pid: request.pid, targetCGWindowID: cgWindowID, timeout: 0.25
-        ).element
+      let writeAccepted = hooks.setPosition(
+        request.pid, CGWindowID(request.windowID), request.targetFrame.origin)
     else {
+      // Nothing was written, so nothing can have moved.
       return .failed(reason: "ax-element-not-found")
     }
-    guard WindowResizer.setAXPosition(element, request.targetFrame.origin) else {
-      return .failed(reason: "ax-set-position-refused")
-    }
 
+    // Verify regardless of what the write reported: an AX call can return an
+    // error (e.g. a messaging timeout) after the app has already started
+    // applying it, and a window that is relocating must never be dragged.
     let verification = DirectMoveVerifier.verify(
       targetFrame: request.targetFrame, deadline: deadline,
       isOnTargetSpace: {
@@ -2376,21 +2391,32 @@ public class SpaceManager {
     case .verified, .membershipLate, .frameOnly:
       Diagnostics.log(
         "move-space",
-        "direct moved windowID=\(request.windowID) verification=\(verification) in \(Int(Date().timeIntervalSince(start) * 1000))ms"
+        "direct moved windowID=\(request.windowID) writeAccepted=\(writeAccepted) verification=\(verification) in \(Int(Date().timeIntervalSince(start) * 1000))ms"
       )
     case .failed(let lastOnTarget, let lastFrame):
+      let write = writeAccepted ? "verify-timeout" : "ax-set-position-refused"
       return .failed(
         reason:
-          "verify-timeout member=\(lastOnTarget) frame=\(lastFrame.map(Self.frameString) ?? "?")"
-      )
+          "\(write) member=\(lastOnTarget) frame=\(lastFrame.map(Self.frameString) ?? "?")")
     }
     let membershipVerified = verification != .frameOnly
 
     guard request.activateAfterMove else {
       return .moved(focused: nil, membershipVerified: membershipVerified)
     }
-    let focused = activateAndVerifyFocus(windowID: request.windowID, pid: request.pid)
+    let focused = hooks.activateAndVerifyFocus(request.windowID, request.pid)
     return .moved(focused: focused, membershipVerified: membershipVerified)
+  }
+
+  /// Resolves the window's AX element (standard lookup, then a short brute
+  /// force) and writes its position. nil when no element was found.
+  private func liveSetAXPosition(pid: pid_t, windowID: CGWindowID, origin: CGPoint) -> Bool? {
+    guard
+      let element = findAXWindowStandard(pid: pid, targetCGWindowID: windowID)
+        ?? findAXWindowBruteForceResult(pid: pid, targetCGWindowID: windowID, timeout: 0.25)
+          .element
+    else { return nil }
+    return WindowResizer.setAXPosition(element, origin)
   }
 
   /// Activates the window and verifies it became the window a resize-grid

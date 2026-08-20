@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 
@@ -38,10 +39,26 @@ enum DirectWindowMoveResult: Equatable {
   case failed(reason: String)
 }
 
-struct MissionControlWindowMoveRequest {
+struct MissionControlWindowMoveRequest: Equatable {
   let windowID: Int
   let windowTitle: String
-  let targetSpace: SpaceInfo
-  let allSpaces: [SpaceInfo]
+  let targetSpaceID: UInt64
   let activateAfterMove: Bool
+}
+
+// MARK: - Direct Move AX Hooks
+
+/// The live Accessibility primitives `performDirectWindowMove` depends on,
+/// injectable so the executor's decisions (verify after any write attempt,
+/// never report failure once the window moved, focus only after the move) are
+/// unit-tested against scripted AX behaviour.
+struct DirectMoveAXHooks {
+  var isAccessibilityTrusted: () -> Bool
+  /// Writes the window's AX position. Returns nil when no AX element could be
+  /// resolved for the window (nothing was written), otherwise the AX write's
+  /// reported success — which is NOT proof the write didn't take effect.
+  var setPosition: (_ pid: pid_t, _ windowID: CGWindowID, _ origin: CGPoint) -> Bool?
+  /// Activates the window and verifies it is what a Cmd+Shift+D resize would
+  /// target. Returns whether focus verified.
+  var activateAndVerifyFocus: (_ windowID: Int, _ pid: pid_t) -> Bool
 }

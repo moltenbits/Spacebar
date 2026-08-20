@@ -66,6 +66,14 @@ enum DirectMoveVerifier {
       } else {
         firstAtTarget = nil
       }
+      // Never overshoot the deadline by a whole poll — it is a shared budget.
+      // The last sleep is trimmed to the deadline and followed directly by the
+      // final read below.
+      let remaining = deadline.timeIntervalSince(now())
+      if remaining <= pollInterval {
+        sleep(max(remaining, 0))
+        break
+      }
       sleep(pollInterval)
     }
 
