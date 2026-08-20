@@ -32,9 +32,11 @@ enum DirectWindowMoveResult: Equatable {
   /// The window moved. `focused` is nil when activation was not requested,
   /// otherwise whether the moved window verified as the window a Cmd+Shift+D
   /// resize would target. `membershipVerified` is false when only the
-  /// WindowServer frame proved the move (CGS membership still lagging at the
-  /// deadline).
-  case moved(focused: Bool?, membershipVerified: Bool = true)
+  /// WindowServer origin proved the move (CGS membership still lagging at the
+  /// deadline). `sizePreserved` is false when the window arrived with a
+  /// different size — the direct path never writes size, so that is AppKit
+  /// clamping a window larger than its new display (as a manual drag would).
+  case moved(focused: Bool?, membershipVerified: Bool = true, sizePreserved: Bool = true)
   /// The window did not provably move; `reason` is a diagnostics token.
   case failed(reason: String)
 }

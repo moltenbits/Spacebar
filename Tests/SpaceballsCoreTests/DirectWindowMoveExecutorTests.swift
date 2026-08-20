@@ -96,6 +96,17 @@ struct DirectWindowMoveExecutorTests {
     #expect(focus.pid == windowPID)
   }
 
+  @Test("Window arrives clamped (oversized for the display) → moved, size change reported, no drag")
+  func clampedSizeReported() {
+    let clamped = CGRect(
+      x: targetFrame.minX, y: targetFrame.minY, width: 500, height: 300)
+    let (manager, _) = makeManager(onTargetSpace: true, frame: clamped)
+
+    let result = manager.performDirectWindowMove(request(deadline: 1.0))
+
+    #expect(result == .moved(focused: nil, membershipVerified: true, sizePreserved: false))
+  }
+
   @Test("Write reported refused but the window reached the target Space → moved, never failed")
   func refusedWriteButMoved() {
     let (manager, ax) = makeManager(onTargetSpace: true, frame: targetFrame)

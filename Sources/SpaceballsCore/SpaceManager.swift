@@ -2226,9 +2226,10 @@ public class SpaceManager {
           targetFrame: targetFrame, activateAfterMove: activateAfterMove,
           deadline: directMoveDeadline))
       switch result {
-      case .moved(let focused, let membershipVerified):
+      case .moved(let focused, let membershipVerified, let sizePreserved):
         var outcome = "direct"
         if !membershipVerified { outcome += "-membership-unverified" }
+        if !sizePreserved { outcome += "-size-changed" }
         if focused == false { outcome += "-focus-unverified" }
         Diagnostics.endTiming(token, outcome: outcome)
         return true
@@ -2387,13 +2388,19 @@ public class SpaceManager {
         dataSource.fetchSpacesForWindow(request.windowID).contains(request.targetSpaceID)
       },
       currentFrame: { windowBounds(forWindowID: request.windowID) })
+    let sizePreserved: Bool
     switch verification {
     case .verified, .membershipLate, .frameOnly:
+      // Size is never written by this path; a change here is AppKit clamping
+      // a window larger than its new display, exactly as a manual drag would.
       let finalBounds = windowBounds(forWindowID: request.windowID)
-      let sizeNote = finalBounds.map {
-        DirectMoveVerifier.sizePreserved($0, request.targetFrame)
-          ? "size-preserved" : "size-changed-by-app:\(Int($0.width))x\(Int($0.height))"
-      } ?? "size-unknown"
+      sizePreserved =
+        finalBounds.map { DirectMoveVerifier.sizePreserved($0, request.targetFrame) } ?? true
+      let sizeNote =
+        finalBounds.map {
+          sizePreserved
+            ? "size-preserved" : "size-changed-by-app:\(Int($0.width))x\(Int($0.height))"
+        } ?? "size-unknown"
       Diagnostics.log(
         "move-space",
         "direct moved windowID=\(request.windowID) writeAccepted=\(writeAccepted) verification=\(verification) \(sizeNote) in \(Int(Date().timeIntervalSince(start) * 1000))ms"
@@ -2407,10 +2414,12 @@ public class SpaceManager {
     let membershipVerified = verification != .frameOnly
 
     guard request.activateAfterMove else {
-      return .moved(focused: nil, membershipVerified: membershipVerified)
+      return .moved(
+        focused: nil, membershipVerified: membershipVerified, sizePreserved: sizePreserved)
     }
     let focused = hooks.activateAndVerifyFocus(request.windowID, request.pid)
-    return .moved(focused: focused, membershipVerified: membershipVerified)
+    return .moved(
+      focused: focused, membershipVerified: membershipVerified, sizePreserved: sizePreserved)
   }
 
   /// Resolves the window's AX element (standard lookup, then a short brute
