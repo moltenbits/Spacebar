@@ -20,6 +20,7 @@ public struct SettingsExport: Codable {
   public var resizePresets: [ResizePreset]
   public var warpCursorOnActivation: Bool
   public var activateMovedItem: Bool
+  public var captureRemoteInput: Bool
   public var timingSpaceSwitchSettle: Double
   public var timingDropSettle: Double
   public var timingBetweenDrags: Double
@@ -34,6 +35,7 @@ public struct SettingsExport: Codable {
     resizeMargins: Double = 0, resizePresets: [ResizePreset]? = nil,
     warpCursorOnActivation: Bool = false,
     activateMovedItem: Bool = true,
+    captureRemoteInput: Bool = false,
     timingSpaceSwitchSettle: Double = 0.25,
     timingDropSettle: Double = 0.2,
     timingBetweenDrags: Double = 0.15
@@ -58,6 +60,7 @@ public struct SettingsExport: Codable {
       ?? ResizePreset.defaultPresets(gridColumns: resizeGridColumns, gridRows: resizeGridRows)
     self.warpCursorOnActivation = warpCursorOnActivation
     self.activateMovedItem = activateMovedItem
+    self.captureRemoteInput = captureRemoteInput
     self.timingSpaceSwitchSettle = timingSpaceSwitchSettle
     self.timingDropSettle = timingDropSettle
     self.timingBetweenDrags = timingBetweenDrags
@@ -83,6 +86,7 @@ public struct SettingsExport: Codable {
       resizePresets: settings.resizePresets,
       warpCursorOnActivation: settings.warpCursorOnActivation,
       activateMovedItem: settings.activateMovedItem,
+      captureRemoteInput: settings.captureRemoteInput,
       timingSpaceSwitchSettle: settings.timingSpaceSwitchSettle,
       timingDropSettle: settings.timingDropSettle,
       timingBetweenDrags: settings.timingBetweenDrags
@@ -108,6 +112,7 @@ public struct SettingsExport: Codable {
     settings.resizePresets = resizePresets
     settings.warpCursorOnActivation = warpCursorOnActivation
     settings.activateMovedItem = activateMovedItem
+    settings.captureRemoteInput = captureRemoteInput
     settings.timingSpaceSwitchSettle = timingSpaceSwitchSettle
     settings.timingDropSettle = timingDropSettle
     settings.timingBetweenDrags = timingBetweenDrags
@@ -121,6 +126,7 @@ public struct SettingsExport: Codable {
     case resizeGridColumns, resizeGridRows, resizeMargins, resizePresets
     case warpCursorOnActivation
     case activateMovedItem
+    case captureRemoteInput
     case timingSpaceSwitchSettle
     case timingDropSettle
     case timingBetweenDrags
@@ -146,6 +152,7 @@ public struct SettingsExport: Codable {
     try c.encode(resizePresets, forKey: .resizePresets)
     try c.encode(warpCursorOnActivation, forKey: .warpCursorOnActivation)
     try c.encode(activateMovedItem, forKey: .activateMovedItem)
+    try c.encode(captureRemoteInput, forKey: .captureRemoteInput)
     try c.encode(timingSpaceSwitchSettle, forKey: .timingSpaceSwitchSettle)
     try c.encode(timingDropSettle, forKey: .timingDropSettle)
     try c.encode(timingBetweenDrags, forKey: .timingBetweenDrags)
@@ -184,6 +191,8 @@ public struct SettingsExport: Codable {
       try c.decodeIfPresent(Bool.self, forKey: .warpCursorOnActivation) ?? false
     activateMovedItem =
       try c.decodeIfPresent(Bool.self, forKey: .activateMovedItem) ?? true
+    captureRemoteInput =
+      try c.decodeIfPresent(Bool.self, forKey: .captureRemoteInput) ?? false
     timingSpaceSwitchSettle =
       try c.decodeIfPresent(Double.self, forKey: .timingSpaceSwitchSettle) ?? 0.25
     timingDropSettle =

@@ -108,7 +108,7 @@ Sources/
 - **SwitcherViewModel** is the single source of truth for UI state — sections, selection (`SelectedItem` enum), search filtering, MRU ordering
 - **SelectedItem** enum: `.spaceHeader(UInt64)`, `.windowRow(Int)`, `.settings` — unifies the keyboard navigation cycle through space headers, window rows, and the settings row
 - **AppDelegate** manages an array of `SwitcherPanel` instances (one per display for "All" mode), all sharing the same `SwitcherViewModel`
-- **KeyInterceptor** uses a `CGEvent.tapCreate` at `.cghidEventTap` level with signal handlers to ensure cleanup on process exit (prevents system-wide input freeze)
+- **KeyInterceptor** uses a `CGEvent.tapCreate` at `.cghidEventTap` level by default with signal handlers to ensure cleanup on process exit (prevents system-wide input freeze). The "Capture input from remote-control apps" setting (`AppSettings.captureRemoteInput`, default off) moves the tap to `.cgSessionEventTap`, which also sees synthetic keyboard events injected by remote-control agents (Jump Desktop, Screen Sharing) — those enter the event stream below the HID tap point and are invisible to the default tap. The setting affects only the keyboard tap; the eject/restore `MouseInputBlocker` keeps its own HID-level tap and passes Spaceballs' own synthetic drags by their `eventSourceUserData` tag, not by tap location
 - **Move mode** in `SwitcherViewModel` visually relocates window rows between sections. `MissionControlContext` + CGEvent mouse simulation handles the actual move via Mission Control drag.
 
 ## Private APIs

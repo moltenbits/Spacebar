@@ -67,6 +67,12 @@ final class KeyInterceptor {
   private(set) var restoring = false
   var suppressConfirm = false
   var keyBindings = KeyBindings()
+  /// Where the tap listens. HID level (default) sees hardware input only;
+  /// session level also sees synthetic keyboard events injected by
+  /// remote-control apps (Jump Desktop, Screen Sharing), which enter the
+  /// event stream below the HID tap point. Set before start(); use
+  /// updateTapLocation(_:) to change it on a running tap.
+  var tapLocation: CGEventTapLocation = .cghidEventTap
 
   func setPanelVisible(_ visible: Bool) {
     panelVisible = visible
@@ -147,7 +153,7 @@ final class KeyInterceptor {
     // We pass `self` via userInfo.
     guard
       let tap = CGEvent.tapCreate(
-        tap: .cghidEventTap,
+        tap: tapLocation,
         place: .headInsertEventTap,
         options: .defaultTap,
         eventsOfInterest: eventMask,
@@ -169,8 +175,17 @@ final class KeyInterceptor {
     CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
     installSignalHandlers()
-    print("Event tap active — Cmd+Tab interception enabled.")
+    let level = tapLocation == .cgSessionEventTap ? "session" : "HID"
+    print("Event tap active (\(level) level) — Cmd+Tab interception enabled.")
     delegate?.keyInterceptorReady()
+  }
+
+  /// Tear down and recreate the tap at a new location (no-op if unchanged).
+  func updateTapLocation(_ location: CGEventTapLocation) {
+    guard location != tapLocation else { return }
+    tapLocation = location
+    stop()
+    start()
   }
 
   func stop() {
