@@ -156,6 +156,29 @@ struct WindowMovePlannerEligibilityTests {
         == .missionControl(reason: .displayFrameUnknown(displayUUID: "display-A")))
   }
 
+  @Test("Guard precedence: target checks, then window membership, then source, then geometry")
+  func guardPrecedence() {
+    // Target not current beats a sticky, offscreen window with unknown bounds.
+    #expect(
+      route(windowSpaceIDs: [1, 2], targetSpaceID: 4, windowBounds: nil, windowIsOnscreen: false)
+        == .missionControl(reason: .targetNotCurrent))
+    // Sticky beats offscreen + unknown bounds.
+    #expect(
+      route(windowSpaceIDs: [1, 2], windowBounds: nil, windowIsOnscreen: false)
+        == .missionControl(reason: .stickyWindow))
+    // Source not current beats offscreen + unknown bounds.
+    #expect(
+      route(windowSpaceIDs: [2], windowBounds: nil, windowIsOnscreen: false)
+        == .missionControl(reason: .sourceNotCurrent))
+    // Offscreen beats unknown bounds, which beats unknown geometry.
+    #expect(
+      route(windowBounds: nil, windowIsOnscreen: false, displayVisibleFrames: [:])
+        == .missionControl(reason: .windowOffscreen))
+    #expect(
+      route(windowBounds: nil, displayVisibleFrames: [:])
+        == .missionControl(reason: .boundsUnknown))
+  }
+
   @Test("Decline reasons render as stable diagnostic tokens")
   func reasonDescriptions() {
     #expect(WindowMoveRoute.DeclineReason.targetNotCurrent.description == "target-not-current")

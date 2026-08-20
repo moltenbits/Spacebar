@@ -365,13 +365,16 @@ public class SpaceManager {
   /// Returns a window's frame in global CG coordinates (top-left origin), or
   /// nil when CGS has no record of the window or its bounds.
   public func windowBounds(forWindowID windowID: Int) -> CGRect? {
-    guard
-      let entry = dataSource.fetchWindowList().first(where: {
-        ($0[kCGWindowNumber as String] as? Int) == windowID
-      }),
-      let boundsRef = entry[kCGWindowBounds as String]
-    else { return nil }
+    dataSource.fetchWindowList()
+      .first(where: { ($0[kCGWindowNumber as String] as? Int) == windowID })
+      .flatMap(Self.windowBounds(in:))
+  }
+
+  /// Parses `kCGWindowBounds` from a raw window-list entry.
+  static func windowBounds(in entry: [String: Any]) -> CGRect? {
+    guard let boundsRef = entry[kCGWindowBounds as String] else { return nil }
     var bounds = CGRect.zero
+    // swiftlint:disable:next force_cast
     let boundsDict = boundsRef as CFTypeRef as! CFDictionary
     guard CGRectMakeWithDictionaryRepresentation(boundsDict, &bounds) else { return nil }
     return bounds
@@ -2132,16 +2135,41 @@ public class SpaceManager {
     }
   }
 
-  // MARK: - Window Move via Mission Control
+  // MARK: - Window Move
 
-  /// Moves a window to a different Space by activating it, opening Mission Control,
-  /// and simulating a drag to the target space.
+  /// Total time budget for a direct (AX frame write) window move: the write,
+  /// the Space-membership + frame verification, the stability hold and the
+  /// final race-guard read all share it. On expiry the move falls back to the
+  /// Mission Control drag, so a silently refusing app costs at most this long.
+  public var directMoveDeadline: TimeInterval = 1.0
+
+  /// Test seam: stands in for both legs of a window move so routing and
+  /// fallback can be asserted without AX or Mission Control. `nil` → `self`.
+  var windowMoveExecutorOverride: (any WindowMoveExecuting)?
+
+  /// Test seam: visible frames (global CG coordinates) by CGS display UUID.
+  /// Defaults to live NSScreen geometry.
+  var displayVisibleFramesProvider: () -> [String: CGRect] = {
+    SpaceManager.currentDisplayVisibleFrames()
+  }
+
+  /// Moves a window to a different Space.
+  ///
+  /// When the window's Space and the target Space are both visible (each is
+  /// the current Space on a different display) the window is relocated
+  /// directly with an AX position write — the same mechanism the resize grid
+  /// uses to cycle a window between displays — verified through CGS, and
+  /// Mission Control is never opened. Every other case, and any direct attempt
+  /// that fails verification, activates the window, opens Mission Control and
+  /// simulates a drag to the target space. Routing is `WindowMovePlanner`.
   ///
   /// - Parameters:
   ///   - windowID: CGWindowID of the window to move.
   ///   - targetSpaceID: ManagedSpaceID of the destination space.
+  ///   - activateAfterMove: bring the moved window to front afterwards. When
+  ///     off, the user's current Spaces and focus are left untouched.
   /// - Throws: `WindowActivationError` if the window can't be found or activated.
-  /// - Returns: `true` if the drag completed successfully.
+  /// - Returns: `true` if the window was moved.
   @discardableResult
   public func moveWindowToSpace(
     windowID: Int, targetSpaceID: UInt64, activateAfterMove: Bool = true
@@ -2149,7 +2177,7 @@ public class SpaceManager {
     let token = Diagnostics.beginTiming(
       "move-space", "moveWindowToSpace",
       extras: ["windowID": "\(windowID)", "targetSpace": "\(targetSpaceID)"])
-    // 1. Look up the window title from the raw window list.
+    // 1. Look up the window in the raw window list.
     let windowList = dataSource.fetchWindowList()
     guard
       let entry = windowList.first(where: {
@@ -2164,33 +2192,93 @@ public class SpaceManager {
       ?? (entry[kCGWindowOwnerName as String] as? String)
       ?? ""
 
-    // 2. Resolve the target space's "Desktop N" label (what MC shows).
-    //    MC uses global numbering across all displays, not per-display ordinals.
+    // 2. Resolve the target Space.
     let allSpaces = getAllSpaces()
     guard let targetSpace = allSpaces.first(where: { $0.id == targetSpaceID }) else {
       Diagnostics.endTiming(token, outcome: "target-space-not-found")
       print("moveWindowToSpace: space \(targetSpaceID) not found")
       return false
     }
+    let sourceSpaceIDs = dataSource.fetchSpacesForWindow(windowID)
+    let executor: any WindowMoveExecuting = windowMoveExecutorOverride ?? self
 
+    // 3. Both Spaces visible? Then a plain frame write moves the window —
+    //    no activation, no Mission Control, no sleeps.
+    let route = WindowMovePlanner.route(
+      spaces: allSpaces, windowSpaceIDs: sourceSpaceIDs, targetSpaceID: targetSpaceID,
+      windowBounds: Self.windowBounds(in: entry),
+      windowIsOnscreen: entry[kCGWindowIsOnscreen as String] as? Bool ?? false,
+      displayVisibleFrames: displayVisibleFramesProvider())
+    switch route {
+    case .direct(let targetFrame):
+      if let rawPID = entry[kCGWindowOwnerPID as String] as? Int {
+        Diagnostics.log(
+          "move-space",
+          "route=direct title=\(Diagnostics.titleForLogging(windowTitle)) → space \(targetSpaceID) frame=\(Self.frameString(targetFrame))"
+        )
+        let result = executor.performDirectWindowMove(
+          DirectWindowMoveRequest(
+            windowID: windowID, pid: pid_t(rawPID), targetSpaceID: targetSpaceID,
+            targetFrame: targetFrame, activateAfterMove: activateAfterMove,
+            deadline: directMoveDeadline))
+        switch result {
+        case .moved(let focused):
+          Diagnostics.endTiming(
+            token, outcome: focused == false ? "direct-focus-unverified" : "direct")
+          return true
+        case .failed(let reason):
+          // The window did not provably move, so the drag is still safe to run.
+          Diagnostics.log("move-space", "direct-fallback:\(reason) — using Mission Control")
+        }
+      } else {
+        Diagnostics.log("move-space", "direct-fallback:pid-unknown — using Mission Control")
+      }
+    case .missionControl(let reason):
+      Diagnostics.log("move-space", "route=mission-control reason=\(reason)")
+    }
+
+    // 4. Mission Control drag.
+    let moved = try executor.performMissionControlWindowMove(
+      MissionControlWindowMoveRequest(
+        windowID: windowID, windowTitle: windowTitle, targetSpace: targetSpace,
+        allSpaces: allSpaces, sourceSpaceIDs: sourceSpaceIDs,
+        activateAfterMove: activateAfterMove))
+    Diagnostics.endTiming(token, outcome: moved ? "moved" : "drag-failed")
+    return moved
+  }
+
+  /// The Mission Control leg of `moveWindowToSpace`: activate the window
+  /// (switching to its Space), open Mission Control, drag its thumbnail onto
+  /// the target space's tile, then re-activate it — or, for a no-activate
+  /// move, put the user back on the Space they were viewing.
+  func performMissionControlWindowMove(
+    _ request: MissionControlWindowMoveRequest
+  ) throws -> Bool {
+    let windowID = request.windowID
+    let targetSpace = request.targetSpace
+    let allSpaces = request.allSpaces
+    let activateAfterMove = request.activateAfterMove
+
+    // 1. Resolve the target space's "Desktop N" label (what MC shows).
+    //    MC uses global numbering across all displays, not per-display ordinals.
     let allDesktopSpaces = allSpaces.filter { $0.type == .desktop }
-    guard let ordinalIndex = allDesktopSpaces.firstIndex(where: { $0.id == targetSpaceID })
+    guard let ordinalIndex = allDesktopSpaces.firstIndex(where: { $0.id == targetSpace.id })
     else {
-      Diagnostics.endTiming(token, outcome: "no-ordinal")
-      print("moveWindowToSpace: could not determine ordinal for space \(targetSpaceID)")
+      Diagnostics.log("move-space", "no-ordinal for space \(targetSpace.id)")
+      print("moveWindowToSpace: could not determine ordinal for space \(targetSpace.id)")
       return false
     }
     let targetSpaceTitle = "Desktop \(ordinalIndex + 1)"
     Diagnostics.log(
       "move-space",
-      "title=\(Diagnostics.titleForLogging(windowTitle)) → \(targetSpaceTitle) targetDisplay=\(targetSpace.displayUUID)"
+      "title=\(Diagnostics.titleForLogging(request.windowTitle)) → \(targetSpaceTitle) targetDisplay=\(targetSpace.displayUUID)"
     )
 
-    // 3. Activate the window to switch to its space.
+    // 2. Activate the window to switch to its space.
     // When the window is already on a current Space there is no space-switch
     // animation to wait out — only a brief settle for the activation itself.
     let currentSpaceIDs = Set(allSpaces.filter(\.isCurrent).map(\.id))
-    let sourceSpaceIDs = dataSource.fetchSpacesForWindow(windowID)
+    let sourceSpaceIDs = request.sourceSpaceIDs
     let needsSpaceSwitch = !sourceSpaceIDs.contains(where: { currentSpaceIDs.contains($0) })
     let sourceSpace = allSpaces.first(where: { sourceSpaceIDs.contains($0.id) })
 
@@ -2205,26 +2293,26 @@ public class SpaceManager {
 
     try activateWindow(id: windowID)
 
-    // 4. Wait for the space switch animation to complete.
+    // 3. Wait for the space switch animation to complete.
     Thread.sleep(forTimeInterval: needsSpaceSwitch ? 0.8 : 0.25)
 
-    // 5. Perform the MC drag. Pass target display so the space button is found
+    // 4. Perform the MC drag. Pass target display so the space button is found
     //    on the correct display (supports cross-display moves), and source
     //    display so the thumbnail search trusts the window's own display first.
     let targetScreenNumber = Self.displayIDForUUID(targetSpace.displayUUID)
     let sourceScreenNumber = sourceSpace.flatMap { Self.displayIDForUUID($0.displayUUID) }
     let moved = moveWindowInMC(
-      windowTitle: windowTitle, targetSpaceTitle: targetSpaceTitle,
+      windowTitle: request.windowTitle, targetSpaceTitle: targetSpaceTitle,
       targetScreenNumber: targetScreenNumber, sourceScreenNumber: sourceScreenNumber,
       switchToTarget: activateAfterMove)
 
     if moved {
       if activateAfterMove {
-        // 6. Activate the window again so it's in front on the target space.
+        // 5. Activate the window again so it's in front on the target space.
         Thread.sleep(forTimeInterval: 0.3)
         try activateWindow(id: windowID)
       } else if let originalCurrentSpaceID {
-        // 6b. No-activate: put the user back on the Space they were viewing
+        // 5b. No-activate: put the user back on the Space they were viewing
         // before the move switched away to grab the window. Best-effort —
         // the move itself already succeeded.
         Thread.sleep(forTimeInterval: 0.3)
@@ -2236,8 +2324,165 @@ public class SpaceManager {
       }
     }
 
-    Diagnostics.endTiming(token, outcome: moved ? "moved" : "drag-failed")
     return moved
+  }
+
+  // MARK: - Direct Window Move (both Spaces visible)
+
+  /// Moves the window by writing its AX position, then verifies through CGS
+  /// that WindowServer reassigned it to the target Space — what a manual
+  /// cross-display drag does — and that the frame landed where planned with
+  /// its size intact. Only then, and only if asked, is the window activated,
+  /// with focus verified as a hard postcondition so a bare Cmd+Shift+D
+  /// afterwards targets the moved window on its new display. Everything shares
+  /// `request.deadline`; `.failed` is returned only while the window has not
+  /// provably moved, so the caller can still fall back to Mission Control.
+  func performDirectWindowMove(_ request: DirectWindowMoveRequest) -> DirectWindowMoveResult {
+    let start = Date()
+    let deadline = start.addingTimeInterval(request.deadline)
+    let cgWindowID = CGWindowID(request.windowID)
+
+    guard Self.ensureAccessibilityTrusted() else {
+      return .failed(reason: "ax-not-trusted")
+    }
+    guard
+      let element = findAXWindowStandard(pid: request.pid, targetCGWindowID: cgWindowID)
+        ?? findAXWindowBruteForceResult(
+          pid: request.pid, targetCGWindowID: cgWindowID, timeout: 0.25
+        ).element
+    else {
+      return .failed(reason: "ax-element-not-found")
+    }
+    guard WindowResizer.setAXPosition(element, request.targetFrame.origin) else {
+      return .failed(reason: "ax-set-position-refused")
+    }
+
+    // Verify: on the target Space AND at the target frame, holding for a short
+    // stable window — some apps report the target at once and keep animating.
+    let stableDuration: TimeInterval = 0.06
+    let pollInterval: TimeInterval = 0.025
+    var firstAtTarget: Date?
+    var verified = false
+    var lastMember = false
+    var lastBounds: CGRect?
+    while Date() < deadline {
+      lastMember = dataSource.fetchSpacesForWindow(request.windowID)
+        .contains(request.targetSpaceID)
+      lastBounds = windowBounds(forWindowID: request.windowID)
+      let atFrame = lastBounds.map { Self.directMoveFrameMatches($0, request.targetFrame) } ?? false
+      if lastMember && atFrame {
+        let since = firstAtTarget ?? Date()
+        firstAtTarget = since
+        if Date().timeIntervalSince(since) >= stableDuration {
+          verified = true
+          break
+        }
+      } else {
+        firstAtTarget = nil
+      }
+      Thread.sleep(forTimeInterval: pollInterval)
+    }
+    if !verified {
+      // Race guard: membership can flip right at the deadline. A window that is
+      // on the target Space has moved — dragging it again would be the bug.
+      if dataSource.fetchSpacesForWindow(request.windowID).contains(request.targetSpaceID) {
+        Diagnostics.log(
+          "move-space",
+          "direct verified late at deadline frame=\(lastBounds.map(Self.frameString) ?? "?")")
+      } else {
+        return .failed(
+          reason:
+            "verify-timeout member=\(lastMember) frame=\(lastBounds.map(Self.frameString) ?? "?")"
+        )
+      }
+    }
+    Diagnostics.log(
+      "move-space",
+      "direct moved windowID=\(request.windowID) in \(Int(Date().timeIntervalSince(start) * 1000))ms"
+    )
+
+    guard request.activateAfterMove else { return .moved(focused: nil) }
+    return .moved(focused: activateAndVerifyFocus(windowID: request.windowID, pid: request.pid))
+  }
+
+  /// Activates the window and verifies it became the system-wide focused
+  /// window (AX focused application → focused window → CGWindowID), retrying
+  /// the activation once. Returns whether focus was verified; the move itself
+  /// is already done either way.
+  private func activateAndVerifyFocus(windowID: Int, pid: pid_t) -> Bool {
+    let attemptBudget: TimeInterval = 0.3
+    for attempt in 1...2 {
+      do {
+        try activateWindow(id: windowID)
+      } catch {
+        Diagnostics.log(
+          "move-space", "direct activation failed attempt=\(attempt): \(error)")
+        return false
+      }
+      let attemptDeadline = Date().addingTimeInterval(attemptBudget)
+      while Date() < attemptDeadline {
+        if Self.systemFocusedWindowID() == CGWindowID(windowID) {
+          Diagnostics.log("move-space", "direct focus verified attempt=\(attempt)")
+          return true
+        }
+        Thread.sleep(forTimeInterval: 0.025)
+      }
+    }
+    Diagnostics.log(
+      "move-space",
+      "direct focus unverified windowID=\(windowID) focused=\(Self.systemFocusedWindowID().map { "\($0)" } ?? "none")"
+    )
+    return false
+  }
+
+  /// CGWindowID of the focused window of the system-wide focused application —
+  /// the window the resize grid would pick up (`WindowResizer.focusedWindow`).
+  static func systemFocusedWindowID() -> CGWindowID? {
+    var appRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(
+        AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &appRef)
+        == .success,
+      let appRef
+    else { return nil }
+    // swiftlint:disable:next force_cast
+    let app = appRef as! AXUIElement
+    var windowRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &windowRef)
+        == .success,
+      let windowRef
+    else { return nil }
+    var cgWindowID: CGWindowID = 0
+    // swiftlint:disable:next force_cast
+    guard _AXUIElementGetWindow(windowRef as! AXUIElement, &cgWindowID) == .success else {
+      return nil
+    }
+    return cgWindowID
+  }
+
+  /// Whether a WindowServer-reported frame is "at" the planned direct-move
+  /// frame: origin within 2pt and size within 5pt — the tolerances
+  /// `WindowResizer` uses to verify its own writes.
+  static func directMoveFrameMatches(_ actual: CGRect, _ target: CGRect) -> Bool {
+    abs(actual.minX - target.minX) < 2 && abs(actual.minY - target.minY) < 2
+      && abs(actual.width - target.width) < 5 && abs(actual.height - target.height) < 5
+  }
+
+  /// Visible frame (menu bar and Dock excluded) of every display in global CG
+  /// coordinates, keyed by CGS display UUID.
+  static func currentDisplayVisibleFrames() -> [String: CGRect] {
+    var frames: [String: CGRect] = [:]
+    for screen in NSScreen.screens {
+      guard let uuid = spaceballsDisplayUUID(for: screen) else { continue }
+      frames[uuid] = CGRect(
+        origin: spaceballsAXOrigin(of: screen), size: screen.visibleFrame.size)
+    }
+    return frames
+  }
+
+  private static func frameString(_ rect: CGRect) -> String {
+    "(\(Int(rect.minX)),\(Int(rect.minY)))/\(Int(rect.width))x\(Int(rect.height))"
   }
 
   /// Picks the Mission Control thumbnail matching `windowTitle` from
@@ -3406,3 +3651,9 @@ extension SpaceManager: SpaceManagerSnapshotProvider {
     }
   }
 }
+
+// MARK: - Window Move Executor Conformance
+
+/// Production executor for both legs of `moveWindowToSpace`; tests swap in a
+/// recorder via `windowMoveExecutorOverride`.
+extension SpaceManager: WindowMoveExecuting {}
