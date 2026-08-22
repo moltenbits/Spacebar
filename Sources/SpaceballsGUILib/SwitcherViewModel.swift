@@ -199,8 +199,9 @@ public final class SwitcherViewModel: ObservableObject {
   /// When true, spaces with no windows are included in the switcher.
   public var showEmptySpaces: Bool = true
 
-  /// When true, activating something whose Space is on a different display
-  /// than the cursor warps the cursor to that display's center (issue #17).
+  /// When true, activating a window warps the cursor onto it — on any
+  /// display, unless the cursor is already over the window — and activating
+  /// an empty Space on another display recenters the cursor there (issue #17).
   /// Synced from AppSettings by the app delegate.
   public var warpCursorOnActivation: Bool = false
 
@@ -1342,23 +1343,27 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   /// Warps the cursor onto the activated window when the cursor-warp setting
-  /// applies (issue #17). Cursor position is global and display-scoped, not
-  /// Space-scoped, so this needn't wait out any Space-switch animation.
+  /// is on and `CursorWarpPlanner` says so (issue #17). Cursor position is
+  /// global and display-scoped, not Space-scoped, so this needn't wait out any
+  /// Space-switch animation.
   private func warpCursorIfNeeded(targetDisplayUUID: String?, windowID: Int?) {
-    guard
-      CursorWarpPlanner.shouldWarp(
-        enabled: warpCursorOnActivation,
-        displayCount: NSScreen.screens.count,
-        cursorDisplayUUID: SpaceManager.cursorDisplayUUID(),
-        targetDisplayUUID: targetDisplayUUID),
-      let targetDisplayUUID
-    else { return }
-    // Center on the activated window itself; fall back to the display center
-    // when there's no window (empty space) or its frame is unknown.
-    if let windowID, let bounds = spaceManager.windowBounds(forWindowID: windowID) {
-      SpaceManager.warpCursor(to: CGPoint(x: bounds.midX, y: bounds.midY))
-    } else if let displayID = SpaceManager.displayIDForUUID(targetDisplayUUID) {
-      SpaceManager.warpCursorToDisplayCenter(displayID)
+    // Gate on the setting before the planner so the window-list read below
+    // is skipped entirely when the feature is off.
+    guard warpCursorOnActivation else { return }
+    let destination = CursorWarpPlanner.destination(
+      cursorPosition: SpaceManager.cursorPosition(),
+      cursorDisplayUUID: SpaceManager.cursorDisplayUUID(),
+      targetDisplayUUID: targetDisplayUUID,
+      windowFrame: windowID.flatMap { spaceManager.windowBounds(forWindowID: $0) })
+    switch destination {
+    case .windowCenter(let point):
+      SpaceManager.warpCursor(to: point)
+    case .displayCenter(let displayUUID):
+      if let displayID = SpaceManager.displayIDForUUID(displayUUID) {
+        SpaceManager.warpCursorToDisplayCenter(displayID)
+      }
+    case nil:
+      break
     }
   }
 
@@ -1754,9 +1759,10 @@ public final class SwitcherViewModel: ObservableObject {
           spaceID: spaceID, targetDisplayUUID: targetDisplayUUID,
           activateAfterMove: activateAfterMove)
         // Center the cursor on the activated space's display. Deliberately
-        // not routed through CursorWarpPlanner: the MC drag already leaves
-        // the pointer on the target display (at the drop point over the
-        // spaces bar), and the planner suppresses same-display warps.
+        // not routed through CursorWarpPlanner: there is no activated window
+        // to aim at, and the MC drag already leaves the pointer on the target
+        // display (at the drop point over the spaces bar), which the planner
+        // would read as "already there" and leave alone.
         if moved && warpAfterMove,
           let displayID = SpaceManager.displayIDForUUID(targetDisplayUUID)
         {
