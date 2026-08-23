@@ -207,7 +207,7 @@ struct MRUOrderingTests {
   @Test("Current space is first, then Z-order for remaining")
   func spaceMRUOrder() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     #expect(vm.sections.count == 2)
@@ -238,7 +238,7 @@ struct MRUOrderingTests {
     ]
     ds.windowSpaces = [30: [3], 10: [1], 20: [2]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Space 2 is current → first. Then Z-order: Space 3, Space 1
@@ -266,7 +266,7 @@ struct MRUOrderingTests {
     ]
     ds.windowSpaces = [10: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.showEmptySpaces = false
     vm.refresh()
 
@@ -295,7 +295,7 @@ struct MRUOrderingTests {
     ]
     ds.windowSpaces = [10: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.showEmptySpaces = true
     vm.refresh()
 
@@ -312,7 +312,7 @@ struct MRUOrderingTests {
   @Test("Section labels use ordinal numbering")
   func sectionLabels() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Space 1 is current → first. Ordinals match display order.
@@ -337,7 +337,7 @@ struct MRUOrderingTests {
     ]
     ds.windowSpaces = [10: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     #expect(vm.sections[0].label == "Fullscreen — Keynote")
@@ -346,7 +346,7 @@ struct MRUOrderingTests {
   @Test("Current space is marked from CGS API")
   func currentSpaceMarked() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Space 1 is current per CGS API
@@ -365,7 +365,7 @@ struct WindowMRUOrderingTests {
   @Test("Activated window moves to front within its space")
   func activatedWindowMovesToFront() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Space 1 has windows [10, 11] in Z-order
@@ -402,7 +402,7 @@ struct WindowMRUOrderingTests {
     ]
     ds.windowSpaces = [10: [1], 11: [1], 12: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Original Z-order: [10, 11, 12]
@@ -437,7 +437,7 @@ struct WindowMRUOrderingTests {
     ]
     ds.windowSpaces = [10: [1], 11: [1], 12: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Activate only window 12
@@ -459,7 +459,7 @@ struct SearchFilteringTests {
   @Test("Empty search returns all sections")
   func emptySearch() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     #expect(vm.filteredSections.count == 2)
@@ -468,7 +468,7 @@ struct SearchFilteringTests {
   @Test("Search by app name filters rows")
   func searchByAppName() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.searchText = "Safari"
@@ -482,7 +482,7 @@ struct SearchFilteringTests {
   @Test("Search by window title filters rows")
   func searchByTitle() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.searchText = "bash"
@@ -496,7 +496,7 @@ struct SearchFilteringTests {
   @Test("Search is case insensitive")
   func caseInsensitive() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.searchText = "SAFARI"
@@ -509,7 +509,7 @@ struct SearchFilteringTests {
   @Test("Search with no matches returns empty")
   func noMatches() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.searchText = "nonexistent"
@@ -519,7 +519,7 @@ struct SearchFilteringTests {
   @Test("Sections with no matching windows are excluded")
   func sectionsExcluded() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.searchText = "Terminal"
@@ -543,7 +543,7 @@ struct SelectionNavigationTests {
   @Test("moveSelectionDown selects first window row when nothing selected")
   func moveDownFromNone() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = nil
@@ -556,7 +556,7 @@ struct SelectionNavigationTests {
   @Test("moveSelectionDown advances through rows across sections")
   func moveDownSequential() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(10)
@@ -579,7 +579,7 @@ struct SelectionNavigationTests {
   @Test("moveSelectionDown past last row selects meta rows in order")
   func moveDownToSettings() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(20)  // last row
@@ -596,7 +596,7 @@ struct SelectionNavigationTests {
   @Test("moveSelectionDown from eject wraps to first window row")
   func moveDownFromEject() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .eject
@@ -607,7 +607,7 @@ struct SelectionNavigationTests {
   @Test("moveSelectionUp selects eject when nothing selected")
   func moveUpFromNone() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = nil
@@ -620,7 +620,7 @@ struct SelectionNavigationTests {
   @Test("moveSelectionUp from first window row wraps to eject")
   func moveUpFromFirstRow() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(10)  // first item
@@ -631,7 +631,7 @@ struct SelectionNavigationTests {
   @Test("moveSelectionUp from eject steps back through meta rows to last row")
   func moveUpFromSettings() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .eject
@@ -648,7 +648,7 @@ struct SelectionNavigationTests {
   @Test("moveSelectionUp from first window in section goes to last window of previous section")
   func moveUpAcrossSections() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(20)  // first (only) window in Space 2
@@ -659,7 +659,7 @@ struct SelectionNavigationTests {
   @Test("resetSelection selects first item in list")
   func resetSelection() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .settings
@@ -670,7 +670,7 @@ struct SelectionNavigationTests {
   @Test("Cmd+Tab lands on 2nd row when current space has windows")
   func cmdTabWithWindows() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Simulate Cmd+Tab: resetSelection then moveDown
@@ -701,7 +701,7 @@ struct SelectionNavigationTests {
     ]
     ds.windowSpaces = [20: [2], 21: [2]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.showEmptySpaces = true
     vm.refresh()
 
@@ -716,7 +716,7 @@ struct SelectionNavigationTests {
   @Test("Navigation works with filtered results")
   func navigationWithFilter() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.searchText = "Safari"
@@ -744,7 +744,7 @@ struct SelectionNavigationTests {
   @Test("Selection on empty results navigates meta rows only")
   func emptyResultsNavigation() {
     let ds = MockDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     // No spaces at all would hide the Eject row; fail open so all three
     // meta rows stay navigable regardless of the machine running the test.
     vm.builtinDisplayUUID = { nil }
@@ -769,7 +769,7 @@ struct SelectionNavigationTests {
   @Test("Activating first window row of a space activates that window")
   func activateFirstWindowRow() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(20)  // first window in Space 2
@@ -784,7 +784,7 @@ struct SelectionNavigationTests {
   @Test("Cmd+W on space header is a no-op")
   func closeOnHeaderNoOp() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .spaceHeader(1)
@@ -795,7 +795,7 @@ struct SelectionNavigationTests {
   @Test("Full tab cycle visits all rows and settings")
   func fullTabCycle() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Expected cycle: 10 → 11 → 20 → spaces → settings → eject → 10
@@ -819,7 +819,7 @@ struct SelectionNavigationTests {
   func moveToNextSpaceAfterRename() {
     let ds = makeTwoSpaceDataSource()
     let store = MockSpaceNameStore()
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -843,7 +843,7 @@ struct SelectionNavigationTests {
   @Test("moveToNextSpace jumps to first window of next section")
   func moveToNextSpaceJumpsToFirstWindow() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(11)  // second window in Space 1
@@ -854,7 +854,7 @@ struct SelectionNavigationTests {
   @Test("moveToPreviousSpace jumps to first window of previous section")
   func moveToPreviousSpaceJumpsBack() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(20)  // Space 2
@@ -865,7 +865,7 @@ struct SelectionNavigationTests {
   @Test("moveToNextSpace stops on each meta row then wraps")
   func moveToNextSpaceWraps() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(20)  // Space 2 (last section)
@@ -885,7 +885,7 @@ struct SelectionNavigationTests {
   @Test("moveToPreviousSpace steps back through the meta rows")
   func moveToPreviousSpaceThroughMetaRows() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .eject
@@ -902,7 +902,7 @@ struct SelectionNavigationTests {
   @Test("moveToPreviousSpace from the first section wraps to eject")
   func moveToPreviousSpaceWrapsToEject() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .windowRow(10)  // Space 1 (first section)
@@ -913,7 +913,7 @@ struct SelectionNavigationTests {
   @Test("activateSelected on eject is a no-op in the view model")
   func activateSelectedOnEjectNoOp() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     vm.selectedItem = .eject
@@ -931,7 +931,7 @@ struct RefreshTests {
   @Test("Refresh clears search text")
   func refreshClearsSearch() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
 
     vm.searchText = "something"
     vm.refresh()
@@ -941,7 +941,7 @@ struct RefreshTests {
   @Test("Refresh populates sections")
   func refreshPopulatesSections() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
 
     #expect(vm.sections.isEmpty)
     vm.refresh()
@@ -951,7 +951,7 @@ struct RefreshTests {
   @Test("Window rows have correct data")
   func windowRowData() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     let terminalRow = vm.flatFilteredRows.first(where: { $0.id == 20 })
@@ -978,7 +978,7 @@ struct RefreshTests {
     ]
     ds.windowSpaces = [10: [1, 2]]  // sticky — on both spaces
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     let row = vm.flatFilteredRows.first(where: { $0.id == 10 })
@@ -997,7 +997,7 @@ struct CustomSpaceNamesTests {
     let store = MockSpaceNameStore()
     store.setCustomName("Work", forSpaceUUID: "uuid-1")
 
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1012,7 +1012,7 @@ struct CustomSpaceNamesTests {
     let ds = makeTwoSpaceDataSource()
     let store = MockSpaceNameStore()
 
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1044,7 +1044,7 @@ struct CustomSpaceNamesTests {
     let store = MockSpaceNameStore()
     store.setCustomName("Should Be Ignored", forSpaceUUID: "uuid-fs")
 
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1056,7 +1056,7 @@ struct CustomSpaceNamesTests {
   @Test("SwitcherSection carries correct spaceUUID")
   func sectionCarriesUUID() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: MockSpaceNameStore()
     )
@@ -1104,7 +1104,7 @@ struct GlobalDesktopOrdinalTests {
     ]
     ds.windowSpaces = [100: [10], 200: [20]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.showEmptySpaces = true
     vm.refresh()
 
@@ -1150,7 +1150,7 @@ struct GlobalDesktopOrdinalTests {
     ]
     ds.windowSpaces = [100: [20]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.showEmptySpaces = true
     vm.refresh()
 
@@ -1166,13 +1166,36 @@ struct GlobalDesktopOrdinalTests {
 
 // MARK: - Display Filtering Tests
 
+@Suite("Display Context")
+struct DisplayContextTests {
+
+  @Test("Refresh uses injected focus and display names without consulting AppKit")
+  func injectedContext() {
+    let provider = StubSwitcherDisplayContextProvider(
+      context: SwitcherDisplayContext(
+        focusedDisplayUUID: "display-2",
+        displayNamesByUUID: ["display-2": "Studio Display"]
+      ))
+    let vm = SwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayDataSource()),
+      displayContextProvider: provider
+    )
+    vm.filterByDisplay = true
+
+    vm.refresh()
+
+    #expect(vm.sections.map(\.id) == [3])
+    #expect(vm.sections.first?.displayName == "Studio Display")
+  }
+}
+
 @Suite("Display Filtering")
 struct DisplayFilteringTests {
 
   @Test("With filterByDisplay off, all displays' spaces appear")
   func allDisplaysShownByDefault() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "display-1"
     vm.filterByDisplay = false
     vm.refresh()
@@ -1186,7 +1209,7 @@ struct DisplayFilteringTests {
   @Test("With filterByDisplay on, only focused display's spaces appear")
   func filterToDisplay1() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "display-1"
     vm.filterByDisplay = true
     vm.refresh()
@@ -1200,7 +1223,7 @@ struct DisplayFilteringTests {
   @Test("Filtering to display-2 shows only that display's space")
   func filterToDisplay2() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "display-2"
     vm.filterByDisplay = true
     vm.refresh()
@@ -1213,7 +1236,7 @@ struct DisplayFilteringTests {
   @Test("Sections carry correct displayUUID")
   func sectionsCarryDisplayUUID() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     let section1 = vm.sections.first(where: { $0.id == 1 })
@@ -1225,7 +1248,7 @@ struct DisplayFilteringTests {
   @Test("Filtering with unknown display UUID shows no sections")
   func filterWithUnknownUUID() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "unknown-display"
     vm.filterByDisplay = true
     vm.refresh()
@@ -1242,7 +1265,7 @@ struct DisplayCyclingTests {
   @Test("Cycling from display-1 to display-2 shows display-2's spaces")
   func cycleToDisplay2() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.filterByDisplay = true
 
     // Start on display-1
@@ -1264,7 +1287,7 @@ struct DisplayCyclingTests {
   @Test("Cycling back from display-2 to display-1 restores display-1's spaces")
   func cycleBackToDisplay1() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.filterByDisplay = true
 
     // Start on display-1, cycle to display-2, then back
@@ -1286,7 +1309,7 @@ struct DisplayCyclingTests {
   @Test("Selection resets to first window after cycling display")
   func selectionResetsOnCycle() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.filterByDisplay = true
 
     // Start on display-1, select a window
@@ -1307,7 +1330,7 @@ struct DisplayCyclingTests {
   @Test("Clearing overrideDisplayUUID resets to default behavior")
   func clearOverrideResetsDefault() {
     let ds = makeTwoDisplayDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.filterByDisplay = true
 
     // Cycle to display-2
@@ -1338,7 +1361,7 @@ struct InlineRenameTests {
   func startRenamingSetsState() {
     let ds = makeTwoSpaceDataSource()
     let store = MockSpaceNameStore()
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1357,7 +1380,7 @@ struct InlineRenameTests {
     let ds = makeTwoSpaceDataSource()
     let store = MockSpaceNameStore()
     store.setCustomName("Work", forSpaceUUID: "uuid-1")
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1372,7 +1395,7 @@ struct InlineRenameTests {
   @Test("startRenaming is no-op on non-first window row")
   func startRenamingNoOpOnNonFirstWindowRow() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: MockSpaceNameStore()
     )
@@ -1388,7 +1411,7 @@ struct InlineRenameTests {
   @Test("startRenaming is no-op when settings selected")
   func startRenamingNoOpOnSettings() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: MockSpaceNameStore()
     )
@@ -1416,7 +1439,7 @@ struct InlineRenameTests {
     ]
     ds.windowSpaces = [10: [1]]
 
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: MockSpaceNameStore()
     )
@@ -1432,7 +1455,7 @@ struct InlineRenameTests {
   func commitRenameSaves() {
     let ds = makeTwoSpaceDataSource()
     let store = MockSpaceNameStore()
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1455,7 +1478,7 @@ struct InlineRenameTests {
     let ds = makeTwoSpaceDataSource()
     let store = MockSpaceNameStore()
     store.setCustomName("Work", forSpaceUUID: "uuid-1")
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1475,7 +1498,7 @@ struct InlineRenameTests {
   func cancelRenameDiscardsChanges() {
     let ds = makeTwoSpaceDataSource()
     let store = MockSpaceNameStore()
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1498,7 +1521,7 @@ struct InlineRenameTests {
   func commitRenamePreservesSelection() {
     let ds = makeTwoSpaceDataSource()
     let store = MockSpaceNameStore()
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1535,7 +1558,7 @@ struct RefreshKeepingSelectionTests {
     ]
     ds.windowSpaces = [10: [1], 11: [1], 12: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Select the middle window (index 1)
@@ -1570,7 +1593,7 @@ struct RefreshKeepingSelectionTests {
     ]
     ds.windowSpaces = [10: [1], 11: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Select the last window
@@ -1605,7 +1628,7 @@ struct RefreshKeepingSelectionTests {
     ]
     ds.windowSpaces = [10: [1], 11: [1], 12: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
     vm.selectedItem = .windowRow(11)
 
@@ -1640,7 +1663,7 @@ struct RefreshKeepingSelectionTests {
     ]
     ds.windowSpaces = [10: [1], 11: [1], 12: [1], 13: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.refresh()
 
     // Select first Safari window (index 0)
@@ -1668,7 +1691,7 @@ struct SpaceSortOrderTests {
   @Test("Default MRU order — current space first, then Z-order")
   func mruOrder() {
     let ds = makeTwoSpaceDataSource()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.spaceSortOrder = .mru
     vm.refresh()
 
@@ -1699,7 +1722,7 @@ struct SpaceSortOrderTests {
     ]
     ds.windowSpaces = [20: [2], 30: [3], 10: [1]]
 
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.spaceSortOrder = .desktopNumber
     vm.refresh()
 
@@ -1733,7 +1756,7 @@ struct SpaceSortOrderTests {
     store.setCustomName("Alpha", forSpaceUUID: "uuid-2")
     // Space 3 keeps default "Desktop 3"
 
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds),
       spaceNameStore: store
     )
@@ -1790,7 +1813,7 @@ struct SettingsExportTests {
 struct SpaceMoveModeTests {
 
   private func makeViewModel() -> SwitcherViewModel {
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: makeTwoDisplayDataSource()),
       spaceNameStore: MockSpaceNameStore())
     vm.showEmptySpaces = true
@@ -1837,7 +1860,7 @@ struct SpaceMoveModeTests {
 
   @Test("Toggle is a no-op with a single display")
   func singleDisplayNoOp() {
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: makeTwoSpaceDataSource()),
       spaceNameStore: MockSpaceNameStore())
     vm.showEmptySpaces = true
@@ -1940,7 +1963,7 @@ struct SpaceMoveModeTests {
 struct WindowMoveAcrossDisplaysTests {
 
   private func makeViewModel() -> SwitcherViewModel {
-    let vm = SwitcherViewModel(
+    let vm = makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: makeTwoDisplayDataSource()),
       spaceNameStore: MockSpaceNameStore())
     vm.showEmptySpaces = true

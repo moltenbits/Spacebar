@@ -65,7 +65,7 @@ struct EmptySpaceMRUTests {
   @Test("Activating an empty space header promotes it to the top")
   func emptySpacePromotedOnActivation() {
     let ds = makeEmptySpaceScenario()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "display-1"
     vm.refresh()
 
@@ -96,7 +96,7 @@ struct EmptySpaceMRUTests {
   @Test("Idle refreshes don't demote an explicitly activated empty space")
   func idleRefreshKeepsEmptySpaceOnTop() {
     let ds = makeEmptySpaceScenario()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "display-1"
     vm.refresh()
 
@@ -115,7 +115,7 @@ struct EmptySpaceMRUTests {
   @Test("Re-engaging a window re-promotes its space above the empty one")
   func windowReengagementRepromotesItsSpace() {
     let ds = makeEmptySpaceScenario()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "display-1"
     vm.refresh()
 
@@ -142,7 +142,7 @@ struct EmptySpaceMRUTests {
   @Test("Programmatic activation (create-space flow) promotes the new space")
   func programmaticActivationPromotesNewSpace() {
     let ds = makeEmptySpaceScenario()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "display-1"
     vm.refresh()
     #expect(vm.sections.last?.id == 4)
@@ -183,7 +183,7 @@ struct SpaceMoveMRUTests {
   @Test("Executing a space move with activation promotes the moved space")
   func movedSpacePromotedWhenActivating() {
     let ds = makeEmptySpaceScenario()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.showEmptySpaces = true
     vm.refresh()
 
@@ -219,7 +219,7 @@ struct SpaceMoveMRUTests {
   @Test("mruTopDisplayUUID follows an explicit empty-space activation")
   func mruTopDisplayFollowsEmptySpaceActivation() {
     let ds = makeEmptySpaceScenario()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.overrideDisplayUUID = "display-1"
     vm.refresh()
     #expect(vm.mruTopDisplayUUID == "display-1")
@@ -234,7 +234,7 @@ struct SpaceMoveMRUTests {
     "Moving the focused display's current space keeps it above the replacement's inferred stamp")
   func movedCurrentSpaceOutranksReplacementStamp() {
     let ds = makeEmptySpaceScenario()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.showEmptySpaces = true
     vm.overrideDisplayUUID = "display-1"
     vm.refresh()
@@ -274,7 +274,7 @@ struct SpaceMoveMRUTests {
   @Test("Executing a space move without activation does not promote it")
   func movedSpaceNotPromotedWhenNotActivating() {
     let ds = makeEmptySpaceScenario()
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.showEmptySpaces = true
     vm.activateMovedItem = false
     vm.refresh()

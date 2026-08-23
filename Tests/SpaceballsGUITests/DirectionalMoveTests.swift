@@ -77,7 +77,8 @@ struct DirectionalSpaceMoveTests {
 
   @Test("Moving toward a physical neighbor retargets the marked space")
   func directionalRetarget() {
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
 
@@ -91,7 +92,8 @@ struct DirectionalSpaceMoveTests {
 
   @Test("An axis with no displays on it is a no-op")
   func emptyAxisIsNoOp() {
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
 
@@ -102,7 +104,8 @@ struct DirectionalSpaceMoveTests {
 
   @Test("Past the far edge, the move wraps to the opposite end")
   func moveWrapsAtTheEdge() {
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
 
@@ -113,7 +116,8 @@ struct DirectionalSpaceMoveTests {
 
   @Test("Without an arrangement, directions fall back to cycling")
   func fallbackToCycling() {
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.refresh()
 
     markSpace(vm, id: 1)
@@ -129,7 +133,8 @@ struct DirectionalWindowMoveTests {
 
   @Test("Moving toward a physical neighbor relocates the marked window row")
   func directionalRetarget() {
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
 
@@ -144,7 +149,8 @@ struct DirectionalWindowMoveTests {
 
   @Test("An axis with no displays on it is a no-op")
   func emptyAxisIsNoOp() {
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
 
@@ -156,7 +162,8 @@ struct DirectionalWindowMoveTests {
 
   @Test("Past the far edge, the move wraps to the opposite end")
   func moveWrapsAtTheEdge() {
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
 
@@ -168,7 +175,8 @@ struct DirectionalWindowMoveTests {
 
   @Test("Without an arrangement, directions fall back to cycling")
   func fallbackToCycling() {
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
     vm.refresh()
 
     vm.selectedItem = .windowRow(10)
@@ -222,7 +230,7 @@ private func tShapeArrangement() -> DisplayArrangement {
 }
 
 private func makeTShapeViewModel() -> SwitcherViewModel {
-  let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTShapeScenario()))
+  let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTShapeScenario()))
   vm.displayArrangement = tShapeArrangement()
   vm.refresh()
   vm.displayOrder = [
@@ -300,7 +308,7 @@ struct MoveModeVerticalSteppingTests {
       display(uuid: "display-right", spaces: [space(id: 3, uuid: "uuid-3")], current: 3),
     ]
     ds.windowSpaces = [10: [1], 30: [3]]
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.displayArrangement = sideBySideArrangement()
     vm.refresh()
     vm.displayOrder = ["display-left", "display-right"]

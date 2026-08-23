@@ -56,7 +56,8 @@ private func makeTwoDisplayScenario() -> MutableMockDataSource {
 
 /// Mode 3 view model over the two-display scenario, meta rows on display-a.
 private func makeViewModel() -> SwitcherViewModel {
-  let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
+  let vm = makeTestSwitcherViewModel(
+    spaceManager: SpaceManager(dataSource: makeTwoDisplayScenario()))
   vm.refresh()
   vm.displayOrder = ["display-a", "display-b"]
   vm.metaRowsDisplayUUID = "display-a"

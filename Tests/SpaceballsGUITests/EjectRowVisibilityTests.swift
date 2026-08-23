@@ -49,7 +49,7 @@ private func makeBuiltinOnlyViewModel() -> SwitcherViewModel {
     window(id: 20, owner: "Terminal", name: "bash", pid: 200),
   ]
   ds.windowSpaces = [10: [1], 20: [2]]
-  let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+  let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
   vm.builtinDisplayUUID = { "display-builtin" }
   vm.refresh()
   return vm
@@ -67,7 +67,7 @@ private func makeExternalConnectedViewModel() -> SwitcherViewModel {
     window(id: 20, owner: "Terminal", name: "bash", pid: 200),
   ]
   ds.windowSpaces = [10: [1], 20: [2]]
-  let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+  let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
   vm.builtinDisplayUUID = { "display-builtin" }
   vm.refresh()
   return vm
@@ -108,7 +108,7 @@ struct EjectRowVisibilityTests {
     ]
     ds.windowList = [window(id: 10, owner: "Safari", name: "Google", pid: 100)]
     ds.windowSpaces = [10: [1]]
-    let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
     vm.builtinDisplayUUID = { "display-builtin" }
     vm.refresh()
     #expect(!vm.ejectAvailable)

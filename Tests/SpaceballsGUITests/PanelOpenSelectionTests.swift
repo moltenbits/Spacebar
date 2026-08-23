@@ -66,7 +66,7 @@ private func makeSoloScenario(
 }
 
 private func makeViewModel(_ ds: MutableMockDataSource) -> SwitcherViewModel {
-  let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+  let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
   vm.refresh()
   vm.displayOrder = ["display-solo", "display-b"]
   vm.resetSelection()

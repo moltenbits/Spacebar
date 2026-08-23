@@ -1,4 +1,5 @@
 import Cocoa
+import Dispatch
 import SpaceballsCore
 
 // MARK: - Data Types
@@ -60,6 +61,34 @@ public enum SelectedItem: Equatable, Hashable {
   case spaces
   case settings
   case eject
+}
+
+// MARK: - Display Context
+
+struct SwitcherDisplayContext: Equatable {
+  let focusedDisplayUUID: String?
+  let displayNamesByUUID: [String: String]
+}
+
+protocol SwitcherDisplayContextProviding {
+  func currentContext() -> SwitcherDisplayContext
+}
+
+private struct AppKitSwitcherDisplayContextProvider: SwitcherDisplayContextProviding {
+  func currentContext() -> SwitcherDisplayContext {
+    dispatchPrecondition(condition: .onQueue(.main))
+
+    var displayNamesByUUID: [String: String] = [:]
+    for screen in NSScreen.screens {
+      guard let uuid = spaceballsDisplayUUID(for: screen) else { continue }
+      displayNamesByUUID[uuid] = screen.localizedName
+    }
+
+    return SwitcherDisplayContext(
+      focusedDisplayUUID: NSScreen.main.flatMap(spaceballsDisplayUUID(for:)),
+      displayNamesByUUID: displayNamesByUUID
+    )
+  }
 }
 
 // MARK: - ViewModel
@@ -269,12 +298,27 @@ public final class SwitcherViewModel: ObservableObject {
   /// Filtered out during refresh() until they actually disappear.
   private var pendingCloseWindowIDs = Set<Int>()
 
-  public init(
+  private let displayContextProvider: any SwitcherDisplayContextProviding
+
+  public convenience init(
     spaceManager: SpaceManager = SpaceManager(),
     spaceNameStore: SpaceNameStoring = SpaceNameStore()
   ) {
+    self.init(
+      spaceManager: spaceManager,
+      spaceNameStore: spaceNameStore,
+      displayContextProvider: AppKitSwitcherDisplayContextProvider()
+    )
+  }
+
+  init(
+    spaceManager: SpaceManager = SpaceManager(),
+    spaceNameStore: SpaceNameStoring = SpaceNameStore(),
+    displayContextProvider: any SwitcherDisplayContextProviding
+  ) {
     self.spaceManager = spaceManager
     self.spaceNameStore = spaceNameStore
+    self.displayContextProvider = displayContextProvider
   }
 
   // MARK: - Refresh
@@ -282,7 +326,7 @@ public final class SwitcherViewModel: ObservableObject {
   public func refresh() {
     let (spaces, rawWindowMap) = spaceManager.windowsBySpace()
     let allWindows = spaceManager.getAllWindows()
-    let displayNames = Self.displayNameMap()
+    let displayContext = displayContextProvider.currentContext()
 
     // Prune pending-close IDs that have actually disappeared from CGWindowList.
     let activeWindowIDs = Set(allWindows.map(\.id))
@@ -298,8 +342,8 @@ public final class SwitcherViewModel: ObservableObject {
 
     // Determine the current space on the focused display.
     // With multiple displays, each has its own current space (from CGS isCurrent).
-    // NSScreen.main identifies which display has keyboard focus.
-    let focusedDisplayUUID = overrideDisplayUUID ?? Self.focusedDisplayUUID()
+    // The live display context uses NSScreen.main to identify keyboard focus.
+    let focusedDisplayUUID = overrideDisplayUUID ?? displayContext.focusedDisplayUUID
     let focusedCurrentSpace: UInt64? = {
       if let uuid = focusedDisplayUUID {
         return spaces.first(where: { $0.isCurrent && $0.displayUUID == uuid })?.id
@@ -493,7 +537,7 @@ public final class SwitcherViewModel: ObservableObject {
           id: spaceID,
           spaceUUID: spaceUUID,
           displayUUID: dispUUID,
-          displayName: displayNames[dispUUID] ?? "",
+          displayName: displayContext.displayNamesByUUID[dispUUID] ?? "",
           label: label,
           isCurrent: isCurrent,
           ordinalLabel: ordinalLabel,
@@ -1914,34 +1958,6 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   // MARK: - Helpers
-
-  /// Returns the CGS display UUID for the screen with keyboard focus.
-  /// Maps NSScreen.main's CGDirectDisplayID → UUID via CGDisplayCreateUUIDFromDisplayID.
-  private static func focusedDisplayUUID() -> String? {
-    guard
-      let screenNumber = NSScreen.main?.deviceDescription[
-        NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
-    else { return nil }
-    let cfUUID = CGDisplayCreateUUIDFromDisplayID(screenNumber)?.takeUnretainedValue()
-    guard let cfUUID else { return nil }
-    return CFUUIDCreateString(nil, cfUUID) as String
-  }
-
-  /// Builds a mapping from CGS display UUID → NSScreen.localizedName.
-  private static func displayNameMap() -> [String: String] {
-    var map: [String: String] = [:]
-    for screen in NSScreen.screens {
-      guard
-        let screenNumber = screen.deviceDescription[
-          NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
-      else { continue }
-      let cfUUID = CGDisplayCreateUUIDFromDisplayID(screenNumber)?.takeUnretainedValue()
-      guard let cfUUID else { continue }
-      let uuid = CFUUIDCreateString(nil, cfUUID) as String
-      map[uuid] = screen.localizedName
-    }
-    return map
-  }
 
   private func reorderByMRU(_ windows: [WindowInfo]) -> [WindowInfo] {
     guard !windowMRUHistory.isEmpty else { return windows }
