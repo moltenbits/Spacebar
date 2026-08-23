@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Result of a workspace restoration operation.
@@ -15,6 +16,12 @@ public struct RestoreSummary {
 
 /// System operations used by `WorkspaceRestorer`. Keeping the orchestration
 /// behind narrow closures makes launch/restore ordering deterministic in tests.
+enum WorkspaceLauncherPlacement: Equatable {
+  case waiting
+  case onTarget
+  case relocated
+}
+
 struct WorkspaceRestorerHooks {
   var createDefaultSpaces: ([String], SpaceNameStoring) throws -> Int
   var allSpaces: () -> [SpaceInfo]
@@ -22,6 +29,7 @@ struct WorkspaceRestorerHooks {
   var switchToSpace: (UInt64) throws -> Void
   var clickDesktop: (UInt64) -> Void
   var executeLauncher: (String, String) throws -> Void
+  var relocateFocusedWindow: (String, UInt64, Set<Int>, Bool) throws -> WorkspaceLauncherPlacement
   var sleep: (TimeInterval) -> Void
 }
 
@@ -47,6 +55,15 @@ public final class WorkspaceRestorer {
       switchToSpace: { try spaceManager.switchToSpace(id: $0) },
       clickDesktop: { spaceManager.clickDesktopOnDisplay(forSpaceID: $0) },
       executeLauncher: { try Self.executeLauncher(type: $0, command: $1) },
+      relocateFocusedWindow: {
+        bundleID, targetSpaceID, preexistingWindowIDs, allowsExistingWindow in
+        try Self.relocateFocusedWindow(
+          bundleID: bundleID,
+          targetSpaceID: targetSpaceID,
+          preexistingWindowIDs: preexistingWindowIDs,
+          allowsExistingWindow: allowsExistingWindow,
+          spaceManager: spaceManager)
+      },
       sleep: { Thread.sleep(forTimeInterval: $0) })
     self.init(
       spaceNameStore: spaceNameStore,
@@ -133,28 +150,61 @@ public final class WorkspaceRestorer {
       // keyboard focus, so we click on the target display's desktop after
       // switching to ensure apps open on the correct display.
       do {
-        try hooks.switchToSpace(spaceID)
-        hooks.sleep(2.0)  // Let focus and any fallback transition settle
-        hooks.clickDesktop(spaceID)
-        hooks.sleep(0.5)
+        try focusTargetSpace(spaceID, forceSwitch: true)
       } catch {
         errors.append((workspace.name, "", "Failed to switch: \(error.localizedDescription)"))
         continue
       }
 
       // Launch only missing apps
-      for launcher in missingLaunchers {
+      var focusFailed = false
+      for (launcherIndex, launcher) in missingLaunchers.enumerated() {
+        let preexistingWindowIDs = Set(
+          hooks.windowsBySpace().values.flatMap { $0 }.map(\.id))
         let resolved = launcher.resolvedCommand(path: workspace.path, name: workspace.name)
         do {
           try hooks.executeLauncher(launcher.type, resolved)
           appsLaunched += 1
-          hooks.sleep(1.0)
+          if launcher.bundleID.isEmpty {
+            hooks.sleep(1.0)
+          } else {
+            try waitForLaunchedWindowPlacement(
+              bundleID: launcher.bundleID,
+              targetSpaceID: spaceID,
+              preexistingWindowIDs: preexistingWindowIDs,
+              // Built-in AppleScript templates explicitly create a new
+              // window. Shell/open launchers may legitimately reactivate an
+              // existing project window (Tower and IntelliJ do this).
+              allowsExistingWindow: launcher.type != "applescript")
+          }
         } catch {
           errors.append(
             (
               workspace.name, launcher.appName.isEmpty ? launcher.type : launcher.appName,
               error.localizedDescription
             ))
+        }
+
+        guard launcherIndex < missingLaunchers.count - 1 else { continue }
+        do {
+          try focusTargetSpace(spaceID, forceSwitch: false)
+        } catch {
+          errors.append((workspace.name, "", "Failed to refocus: \(error.localizedDescription)"))
+          focusFailed = true
+          break
+        }
+      }
+      if focusFailed { continue }
+
+      // Launching or activating an already-running app can switch macOS back
+      // to that app's existing Space. Return to the workspace before applying
+      // its layout, even after the final launcher.
+      if !missingLaunchers.isEmpty {
+        do {
+          try focusTargetSpace(spaceID, forceSwitch: false)
+        } catch {
+          errors.append((workspace.name, "", "Failed to refocus: \(error.localizedDescription)"))
+          continue
         }
       }
 
@@ -173,6 +223,106 @@ public final class WorkspaceRestorer {
       appsLaunched: appsLaunched,
       errors: errors
     )
+  }
+
+  private func focusTargetSpace(_ spaceID: UInt64, forceSwitch: Bool) throws {
+    let isCurrent = hooks.allSpaces().contains { $0.id == spaceID && $0.isCurrent }
+    if forceSwitch || !isCurrent {
+      if !forceSwitch {
+        Diagnostics.log(
+          "workspace-restore", "launcher changed active Space; refocusing space=\(spaceID)")
+      }
+      try hooks.switchToSpace(spaceID)
+      hooks.sleep(2.0)  // Let focus and any fallback transition settle
+    }
+    hooks.clickDesktop(spaceID)
+    hooks.sleep(0.5)
+  }
+
+  private func waitForLaunchedWindowPlacement(
+    bundleID: String,
+    targetSpaceID: UInt64,
+    preexistingWindowIDs: Set<Int>,
+    allowsExistingWindow: Bool
+  ) throws {
+    let maximumAttempts = 12
+    for attempt in 0..<maximumAttempts {
+      switch try hooks.relocateFocusedWindow(
+        bundleID, targetSpaceID, preexistingWindowIDs, allowsExistingWindow)
+      {
+      case .onTarget, .relocated:
+        return
+      case .waiting:
+        if attempt < maximumAttempts - 1 {
+          hooks.sleep(0.25)
+        }
+      }
+    }
+    Diagnostics.log(
+      "workspace-restore",
+      "launcher window placement unresolved after \(maximumAttempts) attempts",
+      app: bundleID)
+  }
+
+  private static func relocateFocusedWindow(
+    bundleID: String,
+    targetSpaceID: UInt64,
+    preexistingWindowIDs: Set<Int>,
+    allowsExistingWindow: Bool,
+    spaceManager: SpaceManager
+  ) throws -> WorkspaceLauncherPlacement {
+    guard let focused = WindowResizer.focusedWindowID() else {
+      Diagnostics.log(
+        "workspace-restore", "launcher has no resolvable focused window", app: bundleID)
+      return .waiting
+    }
+    let focusedBundleID =
+      NSRunningApplication(processIdentifier: focused.pid)?.bundleIdentifier ?? ""
+    guard focusedBundleID == bundleID else {
+      Diagnostics.log(
+        "workspace-restore",
+        "launcher focus belongs to \(focusedBundleID.isEmpty ? "unknown app" : focusedBundleID)",
+        app: bundleID)
+      return .waiting
+    }
+
+    let windowID = Int(focused.windowID)
+    guard
+      canRelocateLaunchedWindow(
+        windowID: windowID,
+        preexistingWindowIDs: preexistingWindowIDs,
+        allowsExistingWindow: allowsExistingWindow)
+    else {
+      Diagnostics.log(
+        "workspace-restore",
+        "waiting for a new launcher window; focused window=\(windowID) predates launch",
+        app: bundleID)
+      return .waiting
+    }
+    guard !spaceManager.spaceIDs(forWindowID: windowID).contains(targetSpaceID) else {
+      return .onTarget
+    }
+    Diagnostics.log(
+      "workspace-restore",
+      "relocating focused launcher window=\(windowID) to space=\(targetSpaceID)",
+      app: bundleID)
+    let moved = try spaceManager.moveWindowToSpace(
+      windowID: windowID,
+      targetSpaceID: targetSpaceID,
+      activateAfterMove: false)
+    guard moved else {
+      throw WorkspaceRestorerError.windowRelocationFailed(
+        windowID: windowID, targetSpaceID: targetSpaceID)
+    }
+    return .relocated
+  }
+
+  static func canRelocateLaunchedWindow(
+    windowID: Int,
+    preexistingWindowIDs: Set<Int>,
+    allowsExistingWindow: Bool
+  ) -> Bool {
+    allowsExistingWindow || !preexistingWindowIDs.contains(windowID)
   }
 
   private static func executeLauncher(type: String, command: String) throws {
@@ -253,11 +403,14 @@ public struct LauncherData {
 
 public enum WorkspaceRestorerError: Error, LocalizedError {
   case unknownLaunchType(String)
+  case windowRelocationFailed(windowID: Int, targetSpaceID: UInt64)
 
   public var errorDescription: String? {
     switch self {
     case .unknownLaunchType(let type):
       return "Unknown launch type: \(type)"
+    case .windowRelocationFailed(let windowID, let targetSpaceID):
+      return "Failed to move window \(windowID) to Space \(targetSpaceID)"
     }
   }
 }

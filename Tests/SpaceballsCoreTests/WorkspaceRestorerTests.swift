@@ -55,6 +55,7 @@ struct WorkspaceRestorerTests {
       switchToSpace: { _ in },
       clickDesktop: { _ in },
       executeLauncher: { _, _ in launched = true },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
     let restorer = WorkspaceRestorer(
       spaceNameStore: names,
@@ -109,6 +110,7 @@ struct WorkspaceRestorerTests {
       switchToSpace: { _ in switched = true },
       clickDesktop: { _ in },
       executeLauncher: { _, _ in launched = true },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
     let restorer = WorkspaceRestorer(
       spaceNameStore: names,
@@ -157,6 +159,7 @@ struct WorkspaceRestorerTests {
       switchToSpace: { _ in },
       clickDesktop: { _ in },
       executeLauncher: { _, _ in },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
     let restorer = WorkspaceRestorer(
       spaceNameStore: names,
@@ -176,5 +179,107 @@ struct WorkspaceRestorerTests {
 
     #expect(attemptedWorkspaces.filter { $0 == "workspace-1" }.count == 2)
     #expect(attemptedWorkspaces.filter { $0 == "workspace-2" }.count == 2)
+  }
+
+  @Test("A launcher that steals Space focus is relocated before the next launcher")
+  func launcherFocusStealIsCorrected() throws {
+    let targetID: UInt64 = 101
+    let otherID: UInt64 = 202
+    let targetUUID = "space-work"
+    let names = makeNameStore([targetUUID: "Work"])
+    var currentSpaceID = otherID
+    var switchTargets: [UInt64] = []
+    var launches: [String] = []
+    var relocations: [(bundleID: String, targetSpaceID: UInt64)] = []
+    var towerPlacementAttempts = 0
+
+    let spaces: () -> [SpaceInfo] = {
+      [
+        SpaceInfo(
+          id: targetID, uuid: targetUUID, type: .desktop,
+          displayUUID: "display-A", isCurrent: currentSpaceID == targetID),
+        SpaceInfo(
+          id: otherID, uuid: "space-other", type: .desktop,
+          displayUUID: "display-A", isCurrent: currentSpaceID == otherID),
+      ]
+    }
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 },
+      allSpaces: spaces,
+      windowsBySpace: { [:] },
+      switchToSpace: { target in
+        switchTargets.append(target)
+        currentSpaceID = target
+      },
+      clickDesktop: { _ in },
+      executeLauncher: { _, command in
+        #expect(currentSpaceID == targetID)
+        launches.append(command)
+      },
+      relocateFocusedWindow: { bundleID, target, _, allowsExistingWindow in
+        relocations.append((bundleID, target))
+        if bundleID == "com.apple.Safari" {
+          #expect(!allowsExistingWindow)
+          return .onTarget
+        }
+        #expect(allowsExistingWindow)
+        towerPlacementAttempts += 1
+        if towerPlacementAttempts == 1 {
+          // The command returned before Tower finished activating its reused
+          // window on another Space.
+          currentSpaceID = otherID
+          return .waiting
+        }
+        return .relocated
+      },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: names,
+      windowLayoutRestorer: nil,
+      hooks: hooks)
+
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "workspace-1", name: "Work", path: nil,
+          launchers: [
+            LauncherData(
+              label: "Tower", type: "open", command: "Tower", appName: "Tower",
+              bundleID: "com.fournova.Tower3"),
+            LauncherData(
+              label: "Safari", type: "applescript", command: "Safari", appName: "Safari",
+              bundleID: "com.apple.Safari"),
+          ])
+      ],
+      defaultNames: ["Work"])
+
+    #expect(launches == ["Tower", "Safari"])
+    #expect(switchTargets == [targetID, targetID])
+    #expect(
+      relocations.map(\.bundleID) == [
+        "com.fournova.Tower3", "com.fournova.Tower3", "com.apple.Safari",
+      ])
+    #expect(currentSpaceID == targetID)
+  }
+
+  @Test("New-window launchers never relocate a pre-existing window")
+  func relocationEligibilityProtectsExistingWindows() {
+    let preexistingWindowIDs: Set<Int> = [700]
+
+    #expect(
+      !WorkspaceRestorer.canRelocateLaunchedWindow(
+        windowID: 700,
+        preexistingWindowIDs: preexistingWindowIDs,
+        allowsExistingWindow: false))
+    #expect(
+      WorkspaceRestorer.canRelocateLaunchedWindow(
+        windowID: 701,
+        preexistingWindowIDs: preexistingWindowIDs,
+        allowsExistingWindow: false))
+    #expect(
+      WorkspaceRestorer.canRelocateLaunchedWindow(
+        windowID: 700,
+        preexistingWindowIDs: preexistingWindowIDs,
+        allowsExistingWindow: true))
   }
 }

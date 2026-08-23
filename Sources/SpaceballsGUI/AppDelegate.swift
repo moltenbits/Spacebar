@@ -1194,7 +1194,7 @@ extension AppDelegate: KeyInterceptorDelegate {
         ? workspacesToRestore[0].name : "workspaces"
       statusHUD.show(message: "Setting up \(displayName)…")
 
-      // Safety timeout — unblock shortcuts after 10 seconds regardless
+      // Safety timeout — window placement may include a Mission Control move.
       let restoreTimeout = DispatchWorkItem { [weak self] in
         guard let self, self.keyInterceptor.restoring else { return }
         self.keyInterceptor.setRestoring(false)
@@ -1203,7 +1203,7 @@ extension AppDelegate: KeyInterceptorDelegate {
           self.statusHUD.dismiss()
         }
       }
-      DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: restoreTimeout)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: restoreTimeout)
 
       DispatchQueue.global(qos: .userInteractive).async { [weak self] in
         guard let self else { return }
