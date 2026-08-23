@@ -34,7 +34,7 @@ struct GeneralPane: View {
           "Move pointer to the activated window",
           isOn: $settings.warpCursorOnActivation)
         Text(
-          "When switching to a window on another display, the pointer jumps to the center of that window so it's easy to find. Only applies with multiple displays."
+          "When switching to a window, the pointer jumps to the center of that window so it's easy to find — on another display or across a very large one. The pointer stays put if it's already over the window."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

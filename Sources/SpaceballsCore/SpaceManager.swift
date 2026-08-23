@@ -396,7 +396,6 @@ public class SpaceManager {
     warpCursor(to: CGPoint(x: bounds.midX, y: bounds.midY))
   }
 
-  /// Returns the display UUID currently containing the mouse cursor.
   /// The CGS display UUID of the built-in display, or nil when none is
   /// active (clamshell mode, desktop Macs).
   public static func builtinDisplayUUID() -> String? {
@@ -411,6 +410,14 @@ public class SpaceManager {
     return nil
   }
 
+  /// The mouse cursor's position in global CG coordinates (top-left origin —
+  /// the same space as `kCGWindowBounds` and `warpCursor(to:)`), or nil when
+  /// no event can be synthesized to read it.
+  public static func cursorPosition() -> CGPoint? {
+    CGEvent(source: nil)?.location
+  }
+
+  /// Returns the display UUID currently containing the mouse cursor.
   public static func cursorDisplayUUID() -> String? {
     let location = NSEvent.mouseLocation  // global, bottom-left origin
     guard
@@ -2428,7 +2435,7 @@ public class SpaceManager {
     guard
       let element = findAXWindowStandard(pid: pid, targetCGWindowID: windowID)
         ?? findAXWindowBruteForceResult(pid: pid, targetCGWindowID: windowID, timeout: 0.25)
-          .element
+        .element
     else { return nil }
     return WindowResizer.setAXPosition(element, origin)
   }

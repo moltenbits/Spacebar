@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -6,52 +7,80 @@ import Testing
 @Suite("Cursor Warp Planner")
 struct CursorWarpPlannerTests {
 
-  @Test("Warps when enabled and the target display differs from the cursor's")
-  func warpsOnCrossDisplayActivation() {
+  /// A window whose center is (500, 400) in global CG coordinates.
+  let windowFrame = CGRect(x: 100, y: 100, width: 800, height: 600)
+  let windowCenter = CGPoint(x: 500, y: 400)
+
+  @Test("Warps onto the window when the cursor is elsewhere on the same display")
+  func sameDisplayCursorOutsideWindow() {
     #expect(
-      CursorWarpPlanner.shouldWarp(
-        enabled: true, displayCount: 2,
-        cursorDisplayUUID: "display-A", targetDisplayUUID: "display-B"))
+      CursorWarpPlanner.destination(
+        cursorPosition: CGPoint(x: 3000, y: 50),
+        cursorDisplayUUID: "display-A", targetDisplayUUID: "display-A",
+        windowFrame: windowFrame) == .windowCenter(windowCenter))
   }
 
-  @Test("Never warps when the setting is off")
-  func settingOff() {
+  @Test("Warps onto the window when the cursor is on another display")
+  func crossDisplayCursorOutsideWindow() {
     #expect(
-      !CursorWarpPlanner.shouldWarp(
-        enabled: false, displayCount: 2,
-        cursorDisplayUUID: "display-A", targetDisplayUUID: "display-B"))
+      CursorWarpPlanner.destination(
+        cursorPosition: CGPoint(x: -500, y: 300),
+        cursorDisplayUUID: "display-B", targetDisplayUUID: "display-A",
+        windowFrame: windowFrame) == .windowCenter(windowCenter))
   }
 
-  @Test("Never warps on a single display")
-  func singleDisplay() {
+  @Test("Leaves the cursor alone when it is already over the window")
+  func cursorAlreadyOverWindow() {
     #expect(
-      !CursorWarpPlanner.shouldWarp(
-        enabled: true, displayCount: 1,
-        cursorDisplayUUID: "display-A", targetDisplayUUID: "display-B"))
+      CursorWarpPlanner.destination(
+        cursorPosition: CGPoint(x: 150, y: 650),
+        cursorDisplayUUID: "display-A", targetDisplayUUID: "display-A",
+        windowFrame: windowFrame) == nil)
   }
 
-  @Test("Never warps when the cursor is already on the target display")
-  func sameDisplay() {
+  @Test("Still warps onto the window when the cursor position is unknown")
+  func unknownCursorPositionWithWindow() {
     #expect(
-      !CursorWarpPlanner.shouldWarp(
-        enabled: true, displayCount: 2,
-        cursorDisplayUUID: "display-A", targetDisplayUUID: "display-A"))
+      CursorWarpPlanner.destination(
+        cursorPosition: nil,
+        cursorDisplayUUID: nil, targetDisplayUUID: "display-A",
+        windowFrame: windowFrame) == .windowCenter(windowCenter))
   }
 
-  @Test("Never warps when the cursor's display is unknown")
-  func unknownCursorDisplay() {
+  @Test("Without a window, warps to the target display's center when the cursor is elsewhere")
+  func noWindowCrossDisplay() {
     #expect(
-      !CursorWarpPlanner.shouldWarp(
-        enabled: true, displayCount: 2,
-        cursorDisplayUUID: nil, targetDisplayUUID: "display-B"))
+      CursorWarpPlanner.destination(
+        cursorPosition: CGPoint(x: 10, y: 10),
+        cursorDisplayUUID: "display-A", targetDisplayUUID: "display-B",
+        windowFrame: nil) == .displayCenter("display-B"))
   }
 
-  @Test("Never warps when the target display is unknown")
-  func unknownTargetDisplay() {
+  @Test("Without a window, leaves the cursor alone on the same display")
+  func noWindowSameDisplay() {
     #expect(
-      !CursorWarpPlanner.shouldWarp(
-        enabled: true, displayCount: 2,
-        cursorDisplayUUID: "display-A", targetDisplayUUID: nil))
+      CursorWarpPlanner.destination(
+        cursorPosition: CGPoint(x: 10, y: 10),
+        cursorDisplayUUID: "display-A", targetDisplayUUID: "display-A",
+        windowFrame: nil) == nil)
+  }
+
+  @Test("Without a window, never warps when the cursor's display is unknown")
+  func noWindowUnknownCursorDisplay() {
+    #expect(
+      CursorWarpPlanner.destination(
+        cursorPosition: nil,
+        cursorDisplayUUID: nil, targetDisplayUUID: "display-B",
+        windowFrame: nil) == nil)
+  }
+
+  @Test("Without a window, never warps when the target display is unknown")
+  func noWindowUnknownTargetDisplay() {
+    #expect(
+      CursorWarpPlanner.destination(
+        cursorPosition: CGPoint(x: 10, y: 10),
+        cursorDisplayUUID: "display-A", targetDisplayUUID: nil,
+        windowFrame: nil) == nil)
   }
 }
 

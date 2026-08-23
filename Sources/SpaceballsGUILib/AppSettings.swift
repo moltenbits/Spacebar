@@ -170,9 +170,10 @@ public final class AppSettings: ObservableObject {
 
   // MARK: - Cursor Warp
 
-  /// When on (default off), activating a window whose Space is on a different
-  /// display than the cursor warps the cursor to that display's center so it's
-  /// easy to locate. Inert on single-display setups.
+  /// When on (default off), activating a window warps the cursor onto it so
+  /// it's easy to locate — across displays or across a very large one. The
+  /// cursor stays put when it's already over the window; activating an empty
+  /// Space on another display recenters the cursor on that display.
   @Published public var warpCursorOnActivation: Bool {
     didSet { defaults.set(warpCursorOnActivation, forKey: "warpCursorOnActivation") }
   }

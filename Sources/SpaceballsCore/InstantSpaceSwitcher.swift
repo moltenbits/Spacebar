@@ -313,7 +313,7 @@ struct DockSwipeSystemDependencies {
     cursorDisplayUUID: { SpaceManager.cursorDisplayUUID() },
     displayIDForUUID: { SpaceManager.displayIDForUUID($0) },
     displayBounds: { CGDisplayBounds($0) },
-    cursorPosition: { CGEvent(source: nil)?.location },
+    cursorPosition: { SpaceManager.cursorPosition() },
     warpCursor: { SpaceManager.warpCursor(to: $0) },
     schedule: { delay, work in
       DockSwipeCursorRestoreScheduler.schedule(after: delay, work)

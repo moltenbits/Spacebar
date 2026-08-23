@@ -70,7 +70,7 @@ private func stackedArrangement() -> DisplayArrangement {
 /// display (MRU order), which differs from the spatial top-to-bottom order —
 /// vertical crossing must follow the arrangement, not displayOrder.
 private func makeViewModel(arranged: Bool) -> SwitcherViewModel {
-  let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: makeStackedScenario()))
+  let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: makeStackedScenario()))
   if arranged { vm.displayArrangement = stackedArrangement() }
   vm.refresh()
   vm.displayOrder = ["display-lower", "display-upper"]
@@ -92,7 +92,7 @@ private func makeSingleDisplayViewModel() -> SwitcherViewModel {
     window(id: 20, owner: "Terminal", name: "bash", pid: 200),
   ]
   ds.windowSpaces = [10: [1], 20: [2]]
-  let vm = SwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+  let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
   vm.displayArrangement = DisplayArrangement(displays: [
     .init(uuid: "display-solo", frame: CGRect(x: 0, y: 0, width: 1800, height: 1169))
   ])

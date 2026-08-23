@@ -135,7 +135,7 @@ struct DefaultSpacePinningTests {
       window(id: 30, owner: "Code", name: "main.swift", pid: 300),
     ]
     ds.windowSpaces = [10: [1], 20: [2], 30: [3]]
-    return SwitcherViewModel(
+    return makeTestSwitcherViewModel(
       spaceManager: SpaceManager(dataSource: ds), spaceNameStore: store)
   }
 
