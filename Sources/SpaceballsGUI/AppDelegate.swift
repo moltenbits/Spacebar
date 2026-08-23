@@ -73,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     windowLayoutCoordinator = WindowLayoutCoordinator(
       store: windowLayoutStore,
       spaceManager: viewModel.spaceManager,
+      spaceNameStore: spaceNameStore,
       appSettings: appSettings
     )
     windowLayoutCoordinator.start()
@@ -1193,7 +1194,7 @@ extension AppDelegate: KeyInterceptorDelegate {
         ? workspacesToRestore[0].name : "workspaces"
       statusHUD.show(message: "Setting up \(displayName)…")
 
-      // Safety timeout — unblock shortcuts after 10 seconds regardless
+      // Safety timeout — window placement may include a Mission Control move.
       let restoreTimeout = DispatchWorkItem { [weak self] in
         guard let self, self.keyInterceptor.restoring else { return }
         self.keyInterceptor.setRestoring(false)
@@ -1202,23 +1203,29 @@ extension AppDelegate: KeyInterceptorDelegate {
           self.statusHUD.dismiss()
         }
       }
-      DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: restoreTimeout)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: restoreTimeout)
 
       DispatchQueue.global(qos: .userInteractive).async { [weak self] in
         guard let self else { return }
 
         let restorer = WorkspaceRestorer(
           spaceManager: self.viewModel.spaceManager,
-          spaceNameStore: self.viewModel.spaceNameStore
+          spaceNameStore: self.viewModel.spaceNameStore,
+          windowLayoutRestorer: WorkspaceWindowLayoutRestorer(store: self.windowLayoutStore)
         )
 
         let data = workspacesToRestore.map { ws in
           WorkspaceConfigData(
+            id: ws.id.uuidString,
             name: ws.name,
             path: ws.path,
             launchers: ws.launchers.map { l in
               LauncherData(
-                label: l.label, type: l.type.rawValue, command: l.command, appName: l.appName)
+                label: l.label,
+                type: l.type.rawValue,
+                command: l.command,
+                appName: l.appName,
+                bundleID: l.bundleID)
             }
           )
         }

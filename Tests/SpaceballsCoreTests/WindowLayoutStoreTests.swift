@@ -108,6 +108,143 @@ struct WindowLayoutStorePersistenceTests {
     #expect(store2.layout(spaceUUID: "s-p", displayUUID: "d-p")?.apps["com.persisted"] == frame)
     #expect(store2.lastSeenDisplayUUID(forSpace: "s-p") == "d-p")
   }
+
+  @Test("Workspace layout follows a workspace across recreated Space UUIDs")
+  func workspaceLayoutSurvivesSpaceRecreation() {
+    let (store, _) = makeStore()
+    let frame = WindowFrame(x: 0, y: 0, width: 1800, height: 1130)
+
+    #expect(
+      !store.associateWorkspace(
+        id: "workspace-1", spaceUUID: "space-old", displayUUID: "display-A"))
+    store.setFrame(
+      bundleID: "com.googlecode.iterm2", frame: frame,
+      spaceUUID: "space-old", displayUUID: "display-A")
+
+    #expect(
+      store.workspaceLayout(workspaceID: "workspace-1", displayUUID: "display-A")?
+        .apps["com.googlecode.iterm2"] == frame)
+
+    #expect(
+      store.associateWorkspace(
+        id: "workspace-1", spaceUUID: "space-new", displayUUID: "display-A"))
+    #expect(
+      store.workspaceLayout(workspaceID: "workspace-1", displayUUID: "display-A")?
+        .apps["com.googlecode.iterm2"] == frame)
+  }
+
+  @Test("Associating an existing Space promotes its saved layouts")
+  func associatingWorkspacePromotesExistingLayout() {
+    let (store, _) = makeStore()
+    let frame = WindowFrame(x: 25, y: 30, width: 900, height: 700)
+    store.setFrame(
+      bundleID: "com.example.app", frame: frame,
+      spaceUUID: "space-current", displayUUID: "display-A")
+
+    #expect(
+      store.associateWorkspace(
+        id: "workspace-1", spaceUUID: "space-current", displayUUID: "display-A"))
+    #expect(
+      store.workspaceLayout(workspaceID: "workspace-1", displayUUID: "display-A")?
+        .apps["com.example.app"] == frame)
+  }
+
+  @Test("A recreated workspace migrates the newest saved frame for each configured app")
+  func recreatedWorkspaceMigratesConfiguredAppFrames() throws {
+    let suite = "WindowLayoutStoreMigrationTests-" + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let olderITermFrame = WindowFrame(x: 20, y: 30, width: 900, height: 700)
+    let newestITermFrame = WindowFrame(x: 0, y: 0, width: 1800, height: 1130)
+    let safariFrame = WindowFrame(x: 100, y: 80, width: 1200, height: 900)
+    let unrelatedFrame = WindowFrame(x: 500, y: 500, width: 400, height: 300)
+    let wrongDisplayFrame = WindowFrame(x: 0, y: 0, width: 3840, height: 2160)
+    let layouts = [
+      "oldest|display-A": SpaceDisplayLayout(
+        spaceUUID: "oldest", displayUUID: "display-A",
+        apps: [
+          "com.googlecode.iterm2": olderITermFrame,
+          "com.apple.Safari": safariFrame,
+        ],
+        capturedAt: Date(timeIntervalSince1970: 100)),
+      "newest|display-A": SpaceDisplayLayout(
+        spaceUUID: "newest", displayUUID: "display-A",
+        apps: [
+          "com.googlecode.iterm2": newestITermFrame,
+          "com.example.unrelated": unrelatedFrame,
+        ],
+        capturedAt: Date(timeIntervalSince1970: 200)),
+      "other|display-B": SpaceDisplayLayout(
+        spaceUUID: "other", displayUUID: "display-B",
+        apps: ["com.googlecode.iterm2": wrongDisplayFrame],
+        capturedAt: Date(timeIntervalSince1970: 300)),
+    ]
+    defaults.set(try JSONEncoder().encode(layouts), forKey: "windowLayouts")
+
+    let store = WindowLayoutStore(
+      defaults: defaults, spaceManager: SpaceManager(dataSource: MockDataSource()))
+
+    #expect(
+      store.associateWorkspace(
+        id: "workspace-1",
+        spaceUUID: "brand-new-space",
+        displayUUID: "display-A",
+        bundleIDs: ["com.googlecode.iterm2", "com.apple.Safari"]))
+
+    let migrated = store.workspaceLayout(
+      workspaceID: "workspace-1", displayUUID: "display-A")
+    #expect(
+      migrated?.apps == [
+        "com.googlecode.iterm2": newestITermFrame,
+        "com.apple.Safari": safariFrame,
+      ])
+  }
+
+  @Test("Workspace layouts and Space associations persist")
+  func workspaceLayoutsPersist() {
+    let suite = "WindowLayoutStoreWorkspaceTests-" + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let manager = SpaceManager(dataSource: MockDataSource())
+    let frame = WindowFrame(x: 10, y: 20, width: 300, height: 400)
+
+    do {
+      let store = WindowLayoutStore(defaults: defaults, spaceManager: manager)
+      _ = store.associateWorkspace(
+        id: "workspace-1", spaceUUID: "space-1", displayUUID: "display-A")
+      store.setFrame(
+        bundleID: "com.persisted", frame: frame,
+        spaceUUID: "space-1", displayUUID: "display-A")
+    }
+
+    let restored = WindowLayoutStore(defaults: defaults, spaceManager: manager)
+    #expect(
+      restored.workspaceLayout(workspaceID: "workspace-1", displayUUID: "display-A")?
+        .apps["com.persisted"] == frame)
+    #expect(
+      restored.associateWorkspace(
+        id: "workspace-1", spaceUUID: "space-2", displayUUID: "display-A"))
+  }
+
+  @Test("clearAll removes workspace layouts and associations")
+  func clearAllRemovesWorkspaceLayouts() {
+    let (store, _) = makeStore()
+    _ = store.associateWorkspace(
+      id: "workspace-1", spaceUUID: "space-1", displayUUID: "display-A")
+    store.setFrame(
+      bundleID: "com.example", frame: WindowFrame(x: 0, y: 0, width: 100, height: 100),
+      spaceUUID: "space-1", displayUUID: "display-A")
+
+    store.clearAll()
+
+    #expect(store.workspaceLayout(workspaceID: "workspace-1", displayUUID: "display-A") == nil)
+    #expect(
+      !store.associateWorkspace(
+        id: "workspace-1", spaceUUID: "space-2", displayUUID: "display-A"))
+  }
 }
 
 @Suite("WindowLayoutStore Space Filtering")

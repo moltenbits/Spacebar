@@ -1,0 +1,24 @@
+# Add this to ~/.codex/config.toml
+# Codex project .codex/config.toml files only load after you trust the project.
+
+[tui]
+notifications = false
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "grrr hook notify --codex --appId Spaceballs"
+timeout = 30
+
+[[hooks.PermissionRequest]]
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "grrr hook notify --codex --appId Spaceballs"
+timeout = 30
+statusMessage = "Sending notification"
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "grrr hook dismiss --appId Spaceballs"
+timeout = 30

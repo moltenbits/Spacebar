@@ -97,7 +97,7 @@ way while building Spaceballs:
 - **Custom space names** — select a Space and press Cmd+R to rename inline (names are local to Spaceballs; macOS does not expose Space names to apps)
 - **Multi-display** — show the panel on the active display, primary display, or per display
 - **Workspaces** — define named Spaces with app launchers, then restore them all in one shot (`spaceballs workspace restore`)
-- **Window layout memory** — optionally remember and restore window positions per Space and display arrangement
+- **Window layout memory** — optionally remember and restore window positions per Space, display arrangement, and configured workspace
 - **Cursor warp** — optionally warp the pointer onto the window you activate
 - **App exclusions** — hide chosen apps from the switcher
 - **Settings export/import** — backup and restore all settings via JSON (CLI or GUI)

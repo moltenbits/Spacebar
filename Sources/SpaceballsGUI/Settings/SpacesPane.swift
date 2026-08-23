@@ -164,7 +164,12 @@ struct SpacesPane: View {
       name: "\(original.name) Copy",
       path: original.path,
       launchers: original.launchers.map {
-        AppLauncher(label: $0.label, type: $0.type, appName: $0.appName, command: $0.command)
+        AppLauncher(
+          label: $0.label,
+          type: $0.type,
+          appName: $0.appName,
+          bundleID: $0.bundleID,
+          command: $0.command)
       }
     )
     // Ensure new UUIDs for the copy

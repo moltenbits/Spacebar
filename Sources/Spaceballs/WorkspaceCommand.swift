@@ -45,11 +45,16 @@ struct RestoreWorkspaceCommand: ParsableCommand {
     let restorer = WorkspaceRestorer(spaceManager: manager, spaceNameStore: store)
     let data = workspaces.map { ws in
       WorkspaceConfigData(
+        id: ws.id.uuidString,
         name: ws.name,
         path: ws.path,
         launchers: ws.launchers.map { l in
           LauncherData(
-            label: l.label, type: l.type.rawValue, command: l.command, appName: l.appName)
+            label: l.label,
+            type: l.type.rawValue,
+            command: l.command,
+            appName: l.appName,
+            bundleID: l.bundleID)
         }
       )
     }
