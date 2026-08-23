@@ -7,17 +7,25 @@ import SpaceballsGUILib
 final class WindowLayoutCoordinator {
   private let store: WindowLayoutStore
   private let spaceManager: SpaceManager
+  private let spaceNameStore: SpaceNameStoring
   private let appSettings: AppSettings
   private var observers: [NSObjectProtocol] = []
 
-  init(store: WindowLayoutStore, spaceManager: SpaceManager, appSettings: AppSettings) {
+  init(
+    store: WindowLayoutStore,
+    spaceManager: SpaceManager,
+    spaceNameStore: SpaceNameStoring,
+    appSettings: AppSettings
+  ) {
     self.store = store
     self.spaceManager = spaceManager
+    self.spaceNameStore = spaceNameStore
     self.appSettings = appSettings
   }
 
   func start() {
     seedLastSeenDisplays()
+    associateConfiguredWorkspaces()
 
     let workspaceCenter = NSWorkspace.shared.notificationCenter
     observers.append(
@@ -100,6 +108,25 @@ final class WindowLayoutCoordinator {
       if store.lastSeenDisplayUUID(forSpace: space.uuid) == nil {
         store.setLastSeenDisplay(spaceUUID: space.uuid, displayUUID: space.displayUUID)
       }
+    }
+  }
+
+  /// Associates named Spaces at launch so layouts captured before stable
+  /// workspace IDs existed are migrated before the next workspace setup.
+  private func associateConfiguredWorkspaces() {
+    guard appSettings.rememberWindowLayouts else { return }
+    let spaces = spaceManager.getAllSpaces()
+    for workspace in appSettings.workspaces {
+      guard
+        let spaceID = spaceNameStore.resolveSpaceID(workspace.name, spaces: spaces),
+        let space = spaces.first(where: { $0.id == spaceID })
+      else { continue }
+      let bundleIDs = Set(workspace.launchers.map(\.bundleID).filter { !$0.isEmpty })
+      store.associateWorkspace(
+        id: workspace.id.uuidString,
+        spaceUUID: space.uuid,
+        displayUUID: space.displayUUID,
+        bundleIDs: bundleIDs)
     }
   }
 }

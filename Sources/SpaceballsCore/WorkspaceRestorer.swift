@@ -122,7 +122,8 @@ public final class WorkspaceRestorer {
         windowLayoutRestorer?.prepare(
           workspaceID: workspace.id,
           spaceUUID: targetSpace.uuid,
-          displayUUID: targetSpace.displayUUID) ?? false
+          displayUUID: targetSpace.displayUUID,
+          bundleIDs: Set(workspace.launchers.map(\.bundleID).filter { !$0.isEmpty })) ?? false
 
       // Existing windows still need an explicit workspace-layout restore.
       guard !missingLaunchers.isEmpty || hasWorkspaceLayout else { continue }
@@ -220,12 +221,20 @@ public struct LauncherData {
   public let type: String  // "shell", "applescript", "open"
   public let command: String
   public let appName: String
+  public let bundleID: String
 
-  public init(label: String, type: String, command: String, appName: String = "") {
+  public init(
+    label: String,
+    type: String,
+    command: String,
+    appName: String = "",
+    bundleID: String = ""
+  ) {
     self.label = label
     self.type = type
     self.command = command
     self.appName = appName
+    self.bundleID = bundleID
   }
 
   public func resolvedCommand(path: String?, name: String) -> String {

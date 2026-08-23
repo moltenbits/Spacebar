@@ -203,6 +203,16 @@ struct LauncherDetailView: View {
               .textFieldStyle(.roundedBorder)
               .frame(width: 160)
             }
+
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Bundle ID").font(.caption).foregroundStyle(.secondary)
+              TextField(
+                "e.g. com.apple.Safari",
+                text: $settings.workspaces[workspaceIndex].launchers[launcherIndex].bundleID
+              )
+              .textFieldStyle(.roundedBorder)
+              .frame(width: 190)
+            }
           }
 
           VStack(alignment: .leading, spacing: 2) {

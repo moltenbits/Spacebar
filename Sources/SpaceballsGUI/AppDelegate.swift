@@ -73,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     windowLayoutCoordinator = WindowLayoutCoordinator(
       store: windowLayoutStore,
       spaceManager: viewModel.spaceManager,
+      spaceNameStore: spaceNameStore,
       appSettings: appSettings
     )
     windowLayoutCoordinator.start()
@@ -1220,7 +1221,11 @@ extension AppDelegate: KeyInterceptorDelegate {
             path: ws.path,
             launchers: ws.launchers.map { l in
               LauncherData(
-                label: l.label, type: l.type.rawValue, command: l.command, appName: l.appName)
+                label: l.label,
+                type: l.type.rawValue,
+                command: l.command,
+                appName: l.appName,
+                bundleID: l.bundleID)
             }
           )
         }

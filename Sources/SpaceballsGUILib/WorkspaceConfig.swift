@@ -29,18 +29,22 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
   /// If set, the launcher is skipped when an app with this name already has
   /// a window in the target space. If empty, the launcher always runs.
   public var appName: String
+  /// Stable application identity used to match saved window layouts.
+  public var bundleID: String
 
   public init(
     id: UUID = UUID(),
     label: String = "",
     type: LaunchType = .shell,
     appName: String = "",
+    bundleID: String = "",
     command: String = ""
   ) {
     self.id = id
     self.label = label
     self.type = type
     self.appName = appName
+    self.bundleID = bundleID
     self.command = command
   }
 
@@ -52,10 +56,23 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
     type = try c.decode(LaunchType.self, forKey: .type)
     command = try c.decode(String.self, forKey: .command)
     appName = try c.decodeIfPresent(String.self, forKey: .appName) ?? ""
+    bundleID =
+      try c.decodeIfPresent(String.self, forKey: .bundleID)
+      ?? Self.knownBundleID(forAppName: appName)
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, label, type, command, appName
+    case id, label, type, command, appName, bundleID
+  }
+
+  private static func knownBundleID(forAppName appName: String) -> String {
+    switch appName.lowercased() {
+    case "iterm", "iterm2": "com.googlecode.iterm2"
+    case "intellij idea": "com.jetbrains.intellij"
+    case "tower": "com.fournova.Tower3"
+    case "safari": "com.apple.Safari"
+    default: ""
+    }
   }
 
   /// Returns the command with workspace variables substituted.
@@ -139,6 +156,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         label: "",
         type: .applescript,
         appName: "iTerm",
+        bundleID: "com.googlecode.iterm2",
         command: """
           tell application "iTerm"
             set newWindow to (create window with default profile)
@@ -153,6 +171,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         label: "",
         type: .shell,
         appName: "IntelliJ IDEA",
+        bundleID: "com.jetbrains.intellij",
         command: "idea \"$PATH\""
       )
     case .tower:
@@ -160,6 +179,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         label: "",
         type: .shell,
         appName: "Tower",
+        bundleID: "com.fournova.Tower3",
         command: "gittower \"$PATH\""
       )
     case .safari:
@@ -167,6 +187,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         label: "",
         type: .applescript,
         appName: "Safari",
+        bundleID: "com.apple.Safari",
         command: """
           tell application "System Events"
             if not (exists process "Safari") then
@@ -184,6 +205,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         label: "$NAME",
         type: .applescript,
         appName: "Safari",
+        bundleID: "com.apple.Safari",
         command: """
           tell application "System Events"
             if not (exists process "Safari") then

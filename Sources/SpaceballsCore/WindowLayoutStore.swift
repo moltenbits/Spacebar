@@ -135,27 +135,38 @@ public final class WindowLayoutStore {
   }
 
   /// Associates the persisted workspace with its current macOS Space. Existing
-  /// Space-keyed data is promoted the first time a workspace is associated, so
-  /// users do not need to re-capture layouts for Spaces that still exist.
+  /// Space-keyed data is promoted the first time a workspace is associated. If
+  /// the backing Space was recreated, the newest saved frame for each configured
+  /// app on the same display seeds the stable workspace layout.
   /// Returns whether a layout is available for this workspace/display pair.
   @discardableResult
   public func associateWorkspace(
-    id workspaceID: String, spaceUUID: String, displayUUID: String
+    id workspaceID: String,
+    spaceUUID: String,
+    displayUUID: String,
+    bundleIDs: Set<String> = []
   ) -> Bool {
     workspaceBySpaceUUID = workspaceBySpaceUUID.filter { $0.value != workspaceID }
     workspaceBySpaceUUID[spaceUUID] = workspaceID
     defaults.set(workspaceBySpaceUUID, forKey: workspaceAssociationsKey)
 
     let workspaceKey = Self.key(workspaceID, displayUUID)
-    if workspaceLayouts[workspaceKey] == nil,
-      let existing = layout(spaceUUID: spaceUUID, displayUUID: displayUUID)
-    {
-      workspaceLayouts[workspaceKey] = WorkspaceDisplayLayout(
-        workspaceID: workspaceID,
+    if workspaceLayouts[workspaceKey] == nil {
+      let migrated = migratedApps(
+        spaceUUID: spaceUUID,
         displayUUID: displayUUID,
-        apps: existing.apps,
-        capturedAt: existing.capturedAt)
-      persistWorkspaceLayouts()
+        bundleIDs: bundleIDs)
+      if !migrated.apps.isEmpty {
+        workspaceLayouts[workspaceKey] = WorkspaceDisplayLayout(
+          workspaceID: workspaceID,
+          displayUUID: displayUUID,
+          apps: migrated.apps,
+          capturedAt: migrated.capturedAt)
+        persistWorkspaceLayouts()
+        Diagnostics.log(
+          "workspace-layout-restore",
+          "seeded workspace layout apps=\(migrated.apps.count)")
+      }
     }
 
     return workspaceLayouts[workspaceKey] != nil
@@ -340,6 +351,32 @@ public final class WindowLayoutStore {
     if let data = try? JSONEncoder().encode(workspaceLayouts) {
       defaults.set(data, forKey: workspaceLayoutsKey)
     }
+  }
+
+  private func migratedApps(
+    spaceUUID: String,
+    displayUUID: String,
+    bundleIDs: Set<String>
+  ) -> (apps: [String: WindowFrame], capturedAt: Date) {
+    let currentLayout = layout(spaceUUID: spaceUUID, displayUUID: displayUUID)
+    let requestedBundleIDs =
+      bundleIDs.isEmpty ? Set(currentLayout?.apps.keys.map { $0 } ?? []) : bundleIDs
+    var apps = currentLayout?.apps.filter { requestedBundleIDs.contains($0.key) } ?? [:]
+    var capturedAt = apps.isEmpty ? Date.distantPast : currentLayout?.capturedAt ?? .distantPast
+
+    for bundleID in requestedBundleIDs where apps[bundleID] == nil {
+      let candidates = layouts.values.filter {
+        $0.displayUUID == displayUUID && $0.apps[bundleID] != nil
+      }
+      guard
+        let latest = candidates.max(by: { $0.capturedAt < $1.capturedAt }),
+        let frame = latest.apps[bundleID]
+      else { continue }
+      apps[bundleID] = frame
+      capturedAt = max(capturedAt, latest.capturedAt)
+    }
+
+    return (apps, capturedAt)
   }
 
   private func setWorkspaceFrame(

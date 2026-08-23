@@ -12,7 +12,7 @@ struct WorkspaceWindowLayoutRestorerTests {
     let restorer = WorkspaceWindowLayoutRestorer(
       maximumAttempts: 3,
       retryInterval: 0.25,
-      prepare: { _, _, _ in true },
+      prepare: { _, _, _, _ in true },
       attempt: { _, _, _, requestedBundleIDs in
         attempts += 1
         if attempts == 1 {
@@ -33,7 +33,8 @@ struct WorkspaceWindowLayoutRestorerTests {
 
     #expect(
       restorer.prepare(
-        workspaceID: "workspace-1", spaceUUID: "space-1", displayUUID: "display-A"))
+        workspaceID: "workspace-1", spaceUUID: "space-1", displayUUID: "display-A",
+        bundleIDs: ["com.googlecode.iterm2"]))
     let outcome = restorer.restoreWhenReady(
       workspaceID: "workspace-1", spaceUUID: "space-1", displayUUID: "display-A")
 
@@ -50,7 +51,7 @@ struct WorkspaceWindowLayoutRestorerTests {
     let restorer = WorkspaceWindowLayoutRestorer(
       maximumAttempts: 3,
       retryInterval: 0,
-      prepare: { _, _, _ in true },
+      prepare: { _, _, _, _ in true },
       attempt: { _, _, _, bundleIDs in
         requested.append(bundleIDs)
         if requested.count == 1 {
@@ -82,7 +83,7 @@ struct WorkspaceWindowLayoutRestorerTests {
     let restorer = WorkspaceWindowLayoutRestorer(
       maximumAttempts: 3,
       retryInterval: 0.25,
-      prepare: { _, _, _ in false },
+      prepare: { _, _, _, _ in false },
       attempt: { _, _, _, _ in
         WorkspaceLayoutRestoreAttempt(
           hasLayout: false, movedWindows: 0,
@@ -92,7 +93,8 @@ struct WorkspaceWindowLayoutRestorerTests {
 
     #expect(
       !restorer.prepare(
-        workspaceID: "workspace-1", spaceUUID: "space-1", displayUUID: "display-A"))
+        workspaceID: "workspace-1", spaceUUID: "space-1", displayUUID: "display-A",
+        bundleIDs: []))
     let outcome = restorer.restoreWhenReady(
       workspaceID: "workspace-1", spaceUUID: "space-1", displayUUID: "display-A")
 
@@ -107,7 +109,7 @@ struct WorkspaceWindowLayoutRestorerTests {
     let restorer = WorkspaceWindowLayoutRestorer(
       maximumAttempts: 3,
       retryInterval: 0.25,
-      prepare: { _, _, _ in true },
+      prepare: { _, _, _, _ in true },
       attempt: { _, _, _, _ in
         WorkspaceLayoutRestoreAttempt(
           hasLayout: true, movedWindows: 0,

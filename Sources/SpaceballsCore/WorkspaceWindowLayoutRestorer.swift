@@ -47,7 +47,7 @@ public struct WorkspaceLayoutRestoreOutcome: Equatable {
 /// Coordinates stable workspace association with bounded polling for windows
 /// created asynchronously by workspace launchers.
 public final class WorkspaceWindowLayoutRestorer {
-  typealias Prepare = (String, String, String) -> Bool
+  typealias Prepare = (String, String, String, Set<String>) -> Bool
   typealias Attempt = (String, String, String, Set<String>?) -> WorkspaceLayoutRestoreAttempt
 
   private let maximumAttempts: Int
@@ -64,10 +64,13 @@ public final class WorkspaceWindowLayoutRestorer {
     self.init(
       maximumAttempts: maximumAttempts,
       retryInterval: retryInterval,
-      prepare: { workspaceID, spaceUUID, displayUUID in
+      prepare: { workspaceID, spaceUUID, displayUUID, bundleIDs in
         Self.onMain {
           store.associateWorkspace(
-            id: workspaceID, spaceUUID: spaceUUID, displayUUID: displayUUID)
+            id: workspaceID,
+            spaceUUID: spaceUUID,
+            displayUUID: displayUUID,
+            bundleIDs: bundleIDs)
         }
       },
       attempt: { workspaceID, spaceUUID, displayUUID, requestedBundleIDs in
@@ -102,9 +105,10 @@ public final class WorkspaceWindowLayoutRestorer {
   public func prepare(
     workspaceID: String,
     spaceUUID: String,
-    displayUUID: String
+    displayUUID: String,
+    bundleIDs: Set<String>
   ) -> Bool {
-    prepareAction(workspaceID, spaceUUID, displayUUID)
+    prepareAction(workspaceID, spaceUUID, displayUUID, bundleIDs)
   }
 
   /// Applies the workspace layout, retrying only apps whose target-Space

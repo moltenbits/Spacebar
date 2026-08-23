@@ -33,10 +33,11 @@ struct WorkspaceRestorerTests {
     let layoutRestorer = WorkspaceWindowLayoutRestorer(
       maximumAttempts: 1,
       retryInterval: 0,
-      prepare: { workspaceID, spaceUUID, displayUUID in
+      prepare: { workspaceID, spaceUUID, displayUUID, bundleIDs in
         #expect(workspaceID == "workspace-1")
         #expect(spaceUUID == target.uuid)
         #expect(displayUUID == target.displayUUID)
+        #expect(bundleIDs == ["com.googlecode.iterm2"])
         return true
       },
       attempt: { _, _, _, _ in
@@ -66,7 +67,8 @@ struct WorkspaceRestorerTests {
           id: "workspace-1", name: "Work", path: nil,
           launchers: [
             LauncherData(
-              label: "Terminal", type: "open", command: "iTerm", appName: "iTerm")
+              label: "Terminal", type: "open", command: "iTerm", appName: "iTerm",
+              bundleID: "com.googlecode.iterm2")
           ])
       ],
       defaultNames: ["Work"])
@@ -86,7 +88,10 @@ struct WorkspaceRestorerTests {
     let layoutRestorer = WorkspaceWindowLayoutRestorer(
       maximumAttempts: 1,
       retryInterval: 0,
-      prepare: { _, _, _ in true },
+      prepare: { _, _, _, bundleIDs in
+        #expect(bundleIDs == ["com.googlecode.iterm2"])
+        return true
+      },
       attempt: { _, _, _, _ in
         attempts += 1
         return WorkspaceLayoutRestoreAttempt(
@@ -116,7 +121,8 @@ struct WorkspaceRestorerTests {
           id: "workspace-1", name: "Work", path: nil,
           launchers: [
             LauncherData(
-              label: "Terminal", type: "open", command: "iTerm", appName: "iTerm")
+              label: "Terminal", type: "open", command: "iTerm", appName: "iTerm",
+              bundleID: "com.googlecode.iterm2")
           ])
       ],
       defaultNames: ["Work"])
@@ -136,7 +142,7 @@ struct WorkspaceRestorerTests {
     let layoutRestorer = WorkspaceWindowLayoutRestorer(
       maximumAttempts: 2,
       retryInterval: 0,
-      prepare: { _, _, _ in true },
+      prepare: { _, _, _, _ in true },
       attempt: { workspaceID, _, _, _ in
         attemptedWorkspaces.append(workspaceID)
         return WorkspaceLayoutRestoreAttempt(

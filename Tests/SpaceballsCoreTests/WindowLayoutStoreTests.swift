@@ -149,6 +149,59 @@ struct WindowLayoutStorePersistenceTests {
         .apps["com.example.app"] == frame)
   }
 
+  @Test("A recreated workspace migrates the newest saved frame for each configured app")
+  func recreatedWorkspaceMigratesConfiguredAppFrames() throws {
+    let suite = "WindowLayoutStoreMigrationTests-" + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    let olderITermFrame = WindowFrame(x: 20, y: 30, width: 900, height: 700)
+    let newestITermFrame = WindowFrame(x: 0, y: 0, width: 1800, height: 1130)
+    let safariFrame = WindowFrame(x: 100, y: 80, width: 1200, height: 900)
+    let unrelatedFrame = WindowFrame(x: 500, y: 500, width: 400, height: 300)
+    let wrongDisplayFrame = WindowFrame(x: 0, y: 0, width: 3840, height: 2160)
+    let layouts = [
+      "oldest|display-A": SpaceDisplayLayout(
+        spaceUUID: "oldest", displayUUID: "display-A",
+        apps: [
+          "com.googlecode.iterm2": olderITermFrame,
+          "com.apple.Safari": safariFrame,
+        ],
+        capturedAt: Date(timeIntervalSince1970: 100)),
+      "newest|display-A": SpaceDisplayLayout(
+        spaceUUID: "newest", displayUUID: "display-A",
+        apps: [
+          "com.googlecode.iterm2": newestITermFrame,
+          "com.example.unrelated": unrelatedFrame,
+        ],
+        capturedAt: Date(timeIntervalSince1970: 200)),
+      "other|display-B": SpaceDisplayLayout(
+        spaceUUID: "other", displayUUID: "display-B",
+        apps: ["com.googlecode.iterm2": wrongDisplayFrame],
+        capturedAt: Date(timeIntervalSince1970: 300)),
+    ]
+    defaults.set(try JSONEncoder().encode(layouts), forKey: "windowLayouts")
+
+    let store = WindowLayoutStore(
+      defaults: defaults, spaceManager: SpaceManager(dataSource: MockDataSource()))
+
+    #expect(
+      store.associateWorkspace(
+        id: "workspace-1",
+        spaceUUID: "brand-new-space",
+        displayUUID: "display-A",
+        bundleIDs: ["com.googlecode.iterm2", "com.apple.Safari"]))
+
+    let migrated = store.workspaceLayout(
+      workspaceID: "workspace-1", displayUUID: "display-A")
+    #expect(
+      migrated?.apps == [
+        "com.googlecode.iterm2": newestITermFrame,
+        "com.apple.Safari": safariFrame,
+      ])
+  }
+
   @Test("Workspace layouts and Space associations persist")
   func workspaceLayoutsPersist() {
     let suite = "WindowLayoutStoreWorkspaceTests-" + UUID().uuidString
