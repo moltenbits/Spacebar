@@ -13,15 +13,55 @@ public struct RestoreSummary {
   }
 }
 
+/// System operations used by `WorkspaceRestorer`. Keeping the orchestration
+/// behind narrow closures makes launch/restore ordering deterministic in tests.
+struct WorkspaceRestorerHooks {
+  var createDefaultSpaces: ([String], SpaceNameStoring) throws -> Int
+  var allSpaces: () -> [SpaceInfo]
+  var windowsBySpace: () -> [UInt64: [WindowInfo]]
+  var switchToSpace: (UInt64) throws -> Void
+  var clickDesktop: (UInt64) -> Void
+  var executeLauncher: (String, String) throws -> Void
+  var sleep: (TimeInterval) -> Void
+}
+
 /// Orchestrates workspace restoration: creates spaces, switches to each,
 /// and launches configured apps. Shared between CLI and GUI.
 public final class WorkspaceRestorer {
-  private let spaceManager: SpaceManager
   private let spaceNameStore: SpaceNameStoring
+  private let windowLayoutRestorer: WorkspaceWindowLayoutRestorer?
+  private let hooks: WorkspaceRestorerHooks
 
-  public init(spaceManager: SpaceManager, spaceNameStore: SpaceNameStoring) {
-    self.spaceManager = spaceManager
+  public convenience init(
+    spaceManager: SpaceManager,
+    spaceNameStore: SpaceNameStoring,
+    windowLayoutRestorer: WorkspaceWindowLayoutRestorer? = nil
+  ) {
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { names, store in
+        try spaceManager.createDefaultSpacesSync(
+          defaultNames: names, spaceNameStore: store)
+      },
+      allSpaces: { spaceManager.getAllSpaces() },
+      windowsBySpace: { spaceManager.windowsBySpace().1 },
+      switchToSpace: { try spaceManager.switchToSpace(id: $0) },
+      clickDesktop: { spaceManager.clickDesktopOnDisplay(forSpaceID: $0) },
+      executeLauncher: { try Self.executeLauncher(type: $0, command: $1) },
+      sleep: { Thread.sleep(forTimeInterval: $0) })
+    self.init(
+      spaceNameStore: spaceNameStore,
+      windowLayoutRestorer: windowLayoutRestorer,
+      hooks: hooks)
+  }
+
+  init(
+    spaceNameStore: SpaceNameStoring,
+    windowLayoutRestorer: WorkspaceWindowLayoutRestorer?,
+    hooks: WorkspaceRestorerHooks
+  ) {
     self.spaceNameStore = spaceNameStore
+    self.windowLayoutRestorer = windowLayoutRestorer
+    self.hooks = hooks
   }
 
   /// Synchronously restores workspaces: creates missing spaces, switches to
@@ -38,12 +78,11 @@ public final class WorkspaceRestorer {
     progress: ((Int, Int, String) -> Void)? = nil
   ) throws -> RestoreSummary {
     // 1. Create any missing spaces
-    let spacesCreated = try spaceManager.createDefaultSpacesSync(
-      defaultNames: defaultNames, spaceNameStore: spaceNameStore)
+    let spacesCreated = try hooks.createDefaultSpaces(defaultNames, spaceNameStore)
 
     // Brief pause if spaces were created
     if spacesCreated > 0 {
-      Thread.sleep(forTimeInterval: 1.0)
+      hooks.sleep(1.0)
     }
 
     // 2. Restore each workspace that has launchers
@@ -55,14 +94,18 @@ public final class WorkspaceRestorer {
       progress?(i, workspacesWithLaunchers.count, workspace.name)
 
       // Resolve space name to ID
-      let spaces = spaceManager.getAllSpaces()
+      let spaces = hooks.allSpaces()
       guard let spaceID = spaceNameStore.resolveSpaceID(workspace.name, spaces: spaces) else {
         errors.append((workspace.name, "", "Space not found"))
         continue
       }
+      guard let targetSpace = spaces.first(where: { $0.id == spaceID }) else {
+        errors.append((workspace.name, "", "Resolved Space is missing from the current snapshot"))
+        continue
+      }
 
       // Check which apps are already running in this space
-      let (_, windowMap) = spaceManager.windowsBySpace()
+      let windowMap = hooks.windowsBySpace()
       let existingApps = Set(
         (windowMap[spaceID] ?? []).map(\.ownerName)
       )
@@ -73,18 +116,26 @@ public final class WorkspaceRestorer {
         return !existingApps.contains(launcher.appName)
       }
 
-      // Skip this space entirely if all apps are present
-      guard !missingLaunchers.isEmpty else { continue }
+      // Associate before launching so future Spaceballs resizes update the
+      // stable workspace layout even when no prior workspace layout exists.
+      let hasWorkspaceLayout =
+        windowLayoutRestorer?.prepare(
+          workspaceID: workspace.id,
+          spaceUUID: targetSpace.uuid,
+          displayUUID: targetSpace.displayUUID) ?? false
+
+      // Existing windows still need an explicit workspace-layout restore.
+      guard !missingLaunchers.isEmpty || hasWorkspaceLayout else { continue }
 
       // Switch to the space and ensure it has keyboard focus.
       // On multi-display, Launch Services opens apps on the display with
       // keyboard focus, so we click on the target display's desktop after
       // switching to ensure apps open on the correct display.
       do {
-        try spaceManager.switchToSpace(id: spaceID)
-        Thread.sleep(forTimeInterval: 2.0)  // Let focus and any fallback transition settle
-        spaceManager.clickDesktopOnDisplay(forSpaceID: spaceID)
-        Thread.sleep(forTimeInterval: 0.5)
+        try hooks.switchToSpace(spaceID)
+        hooks.sleep(2.0)  // Let focus and any fallback transition settle
+        hooks.clickDesktop(spaceID)
+        hooks.sleep(0.5)
       } catch {
         errors.append((workspace.name, "", "Failed to switch: \(error.localizedDescription)"))
         continue
@@ -94,9 +145,9 @@ public final class WorkspaceRestorer {
       for launcher in missingLaunchers {
         let resolved = launcher.resolvedCommand(path: workspace.path, name: workspace.name)
         do {
-          try executeLauncher(type: launcher.type, command: resolved)
+          try hooks.executeLauncher(launcher.type, resolved)
           appsLaunched += 1
-          Thread.sleep(forTimeInterval: 1.0)
+          hooks.sleep(1.0)
         } catch {
           errors.append(
             (
@@ -104,6 +155,13 @@ public final class WorkspaceRestorer {
               error.localizedDescription
             ))
         }
+      }
+
+      if hasWorkspaceLayout {
+        _ = windowLayoutRestorer?.restoreWhenReady(
+          workspaceID: workspace.id,
+          spaceUUID: targetSpace.uuid,
+          displayUUID: targetSpace.displayUUID)
       }
     }
 
@@ -116,7 +174,7 @@ public final class WorkspaceRestorer {
     )
   }
 
-  private func executeLauncher(type: String, command: String) throws {
+  private static func executeLauncher(type: String, command: String) throws {
     let process = Process()
     let pipe = Pipe()
     process.standardOutput = pipe
@@ -144,11 +202,13 @@ public final class WorkspaceRestorer {
 /// Lightweight data transfer struct so WorkspaceRestorer doesn't depend on
 /// SpaceballsGUILib's WorkspaceConfig (which lives in a different module).
 public struct WorkspaceConfigData {
+  public let id: String
   public let name: String
   public let path: String?
   public let launchers: [LauncherData]
 
-  public init(name: String, path: String?, launchers: [LauncherData]) {
+  public init(id: String, name: String, path: String?, launchers: [LauncherData]) {
+    self.id = id
     self.name = name
     self.path = path
     self.launchers = launchers

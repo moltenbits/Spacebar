@@ -1209,11 +1209,13 @@ extension AppDelegate: KeyInterceptorDelegate {
 
         let restorer = WorkspaceRestorer(
           spaceManager: self.viewModel.spaceManager,
-          spaceNameStore: self.viewModel.spaceNameStore
+          spaceNameStore: self.viewModel.spaceNameStore,
+          windowLayoutRestorer: WorkspaceWindowLayoutRestorer(store: self.windowLayoutStore)
         )
 
         let data = workspacesToRestore.map { ws in
           WorkspaceConfigData(
+            id: ws.id.uuidString,
             name: ws.name,
             path: ws.path,
             launchers: ws.launchers.map { l in

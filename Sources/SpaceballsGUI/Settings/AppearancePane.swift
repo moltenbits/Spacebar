@@ -81,7 +81,7 @@ struct AppearancePane: View {
           "Remember window layouts per space and display",
           isOn: $settings.rememberWindowLayouts)
         Text(
-          "When you resize a window via Spaceballs, its frame is saved for the current space and display. Switching that space to a different display restores each app's last layout for that display."
+          "When you resize a window via Spaceballs, its frame is saved for the current space and display. Layouts are restored when a space moves displays and after configured workspace apps open."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

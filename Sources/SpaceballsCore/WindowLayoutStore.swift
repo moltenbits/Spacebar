@@ -36,6 +36,26 @@ public struct SpaceDisplayLayout: Codable {
   }
 }
 
+/// Saved app frames for a persisted workspace on a specific display. Unlike
+/// `SpaceDisplayLayout`, this survives deletion and recreation of the backing
+/// macOS Space because `workspaceID` comes from `WorkspaceConfig.id`.
+public struct WorkspaceDisplayLayout: Codable {
+  public var workspaceID: String
+  public var displayUUID: String
+  public var apps: [String: WindowFrame]
+  public var capturedAt: Date
+
+  public init(
+    workspaceID: String, displayUUID: String,
+    apps: [String: WindowFrame] = [:], capturedAt: Date = Date()
+  ) {
+    self.workspaceID = workspaceID
+    self.displayUUID = displayUUID
+    self.apps = apps
+    self.capturedAt = capturedAt
+  }
+}
+
 // MARK: - Display Helpers
 
 /// EDID-derived UUID for a screen — stable across plug/unplug for the same physical monitor.
@@ -68,9 +88,13 @@ public final class WindowLayoutStore {
   private let spaceManager: SpaceManager
   private let layoutsKey = "windowLayouts"
   private let lastDisplayKey = "spaceLastDisplay"
+  private let workspaceLayoutsKey = "workspaceWindowLayouts"
+  private let workspaceAssociationsKey = "workspaceSpaceAssociations"
 
   private var layouts: [String: SpaceDisplayLayout]
   private var lastSeenDisplay: [String: String]
+  private var workspaceLayouts: [String: WorkspaceDisplayLayout]
+  private var workspaceBySpaceUUID: [String: String]
 
   public init(defaults: UserDefaults = .standard, spaceManager: SpaceManager) {
     self.defaults = defaults
@@ -85,12 +109,56 @@ public final class WindowLayoutStore {
     }
 
     self.lastSeenDisplay = (defaults.dictionary(forKey: lastDisplayKey) as? [String: String]) ?? [:]
+
+    if let data = defaults.data(forKey: workspaceLayoutsKey),
+      let decoded = try? JSONDecoder().decode([String: WorkspaceDisplayLayout].self, from: data)
+    {
+      self.workspaceLayouts = decoded
+    } else {
+      self.workspaceLayouts = [:]
+    }
+
+    self.workspaceBySpaceUUID =
+      (defaults.dictionary(forKey: workspaceAssociationsKey) as? [String: String]) ?? [:]
   }
 
   // MARK: - Persistence
 
   public func layout(spaceUUID: String, displayUUID: String) -> SpaceDisplayLayout? {
     layouts[Self.key(spaceUUID, displayUUID)]
+  }
+
+  public func workspaceLayout(
+    workspaceID: String, displayUUID: String
+  ) -> WorkspaceDisplayLayout? {
+    workspaceLayouts[Self.key(workspaceID, displayUUID)]
+  }
+
+  /// Associates the persisted workspace with its current macOS Space. Existing
+  /// Space-keyed data is promoted the first time a workspace is associated, so
+  /// users do not need to re-capture layouts for Spaces that still exist.
+  /// Returns whether a layout is available for this workspace/display pair.
+  @discardableResult
+  public func associateWorkspace(
+    id workspaceID: String, spaceUUID: String, displayUUID: String
+  ) -> Bool {
+    workspaceBySpaceUUID = workspaceBySpaceUUID.filter { $0.value != workspaceID }
+    workspaceBySpaceUUID[spaceUUID] = workspaceID
+    defaults.set(workspaceBySpaceUUID, forKey: workspaceAssociationsKey)
+
+    let workspaceKey = Self.key(workspaceID, displayUUID)
+    if workspaceLayouts[workspaceKey] == nil,
+      let existing = layout(spaceUUID: spaceUUID, displayUUID: displayUUID)
+    {
+      workspaceLayouts[workspaceKey] = WorkspaceDisplayLayout(
+        workspaceID: workspaceID,
+        displayUUID: displayUUID,
+        apps: existing.apps,
+        capturedAt: existing.capturedAt)
+      persistWorkspaceLayouts()
+    }
+
+    return workspaceLayouts[workspaceKey] != nil
   }
 
   public func setFrame(
@@ -104,13 +172,23 @@ public final class WindowLayoutStore {
     layout.capturedAt = Date()
     layouts[key] = layout
     persistLayouts()
+
+    if let workspaceID = workspaceBySpaceUUID[spaceUUID] {
+      setWorkspaceFrame(
+        bundleID: bundleID, frame: frame,
+        workspaceID: workspaceID, displayUUID: displayUUID)
+    }
   }
 
   public func clearAll() {
     layouts = [:]
     lastSeenDisplay = [:]
+    workspaceLayouts = [:]
+    workspaceBySpaceUUID = [:]
     defaults.removeObject(forKey: layoutsKey)
     defaults.removeObject(forKey: lastDisplayKey)
+    defaults.removeObject(forKey: workspaceLayoutsKey)
+    defaults.removeObject(forKey: workspaceAssociationsKey)
   }
 
   public func lastSeenDisplayUUID(forSpace spaceUUID: String) -> String? {
@@ -185,73 +263,54 @@ public final class WindowLayoutStore {
       Diagnostics.endTiming(token, outcome: "no-layout-for-pair")
       return 0
     }
-    guard let screen = spaceballsScreen(forDisplayUUID: displayUUID) else {
-      Diagnostics.endTiming(token, outcome: "display-not-attached")
-      return 0
-    }
-    guard let targetSpaceID = spaceID(forUUID: spaceUUID) else {
-      // Can't resolve the space — restoring blind risks exactly the cross-space
-      // moves this method must never make. Restore nothing.
-      Diagnostics.endTiming(token, outcome: "space-uuid-unresolved")
-      return 0
-    }
+    let result = apply(
+      apps: layout.apps,
+      targetSpaceUUID: spaceUUID,
+      displayUUID: displayUUID,
+      requestedBundleIDs: nil)
+    Diagnostics.endTiming(
+      token,
+      outcome:
+        "moved=\(result.movedWindows) pending=\(result.pendingBundleIDs.count)")
+    return result.movedWindows
+  }
 
-    let origin = spaceballsAXOrigin(of: screen)
-    var moved = 0
-    var skippedOffSpace = 0
-
-    Diagnostics.log(
-      "layout-restore", "applying layout apps=\(layout.apps.count) targetSpaceID=\(targetSpaceID)")
-
-    for (bundleID, relative) in layout.apps {
-      let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-      if runningApps.isEmpty {
-        Diagnostics.log("layout-restore", "skip — app not running", app: bundleID)
-        continue
-      }
-      for app in runningApps {
-        let pid = app.processIdentifier
-        let axApp = AXUIElementCreateApplication(pid)
-        var ref: CFTypeRef?
-        guard
-          AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &ref) == .success,
-          let raw = ref as? [AXUIElement]
-        else {
-          Diagnostics.log("layout-restore", "skip — windows unreadable", app: bundleID)
-          continue
-        }
-
-        let absolute = CGRect(
-          x: origin.x + CGFloat(relative.x),
-          y: origin.y + CGFloat(relative.y),
-          width: CGFloat(relative.width),
-          height: CGFloat(relative.height)
-        )
-
-        for window in raw {
-          var cgWid: CGWindowID = 0
-          guard _AXUIElementGetWindow(window, &cgWid) == .success else {
-            Diagnostics.log(
-              "layout-restore", "skip window — CGWindowID unresolved", app: bundleID)
-            continue
-          }
-          guard windowIsOnSpace(windowID: Int(cgWid), spaceID: targetSpaceID) else {
-            skippedOffSpace += 1
-            Diagnostics.log(
-              "layout-restore",
-              "skip window=\(cgWid) — not on target space \(targetSpaceID)", app: bundleID)
-            continue
-          }
-          guard
-            (try? WindowResizer.setFrame(window, frame: absolute, label: "restore")) != nil
-          else { continue }
-          moved += 1
-        }
-      }
+  /// Applies a stable workspace layout to windows on the workspace's current
+  /// backing Space. `requestedBundleIDs` lets retry callers limit subsequent
+  /// attempts to apps whose windows were not ready yet.
+  public func restoreWorkspace(
+    workspaceID: String,
+    targetSpaceUUID: String,
+    displayUUID: String,
+    requestedBundleIDs: Set<String>? = nil
+  ) -> WorkspaceLayoutRestoreAttempt {
+    let token = Diagnostics.beginTiming(
+      "workspace-layout-restore", "attempt",
+      extras: [
+        "workspace": workspaceID,
+        "space": targetSpaceUUID,
+        "display": displayUUID,
+      ])
+    guard let layout = workspaceLayout(workspaceID: workspaceID, displayUUID: displayUUID)
+    else {
+      let result = WorkspaceLayoutRestoreAttempt(
+        hasLayout: false, movedWindows: 0,
+        restoredBundleIDs: [], pendingBundleIDs: [])
+      Diagnostics.endTiming(token, outcome: "no-layout-for-workspace-display")
+      return result
     }
 
-    Diagnostics.endTiming(token, outcome: "moved=\(moved) skippedOffSpace=\(skippedOffSpace)")
-    return moved
+    let result = apply(
+      apps: layout.apps,
+      targetSpaceUUID: targetSpaceUUID,
+      displayUUID: displayUUID,
+      requestedBundleIDs: requestedBundleIDs)
+    Diagnostics.endTiming(
+      token,
+      outcome:
+        "moved=\(result.movedWindows) restored=\(result.restoredBundleIDs.count) pending=\(result.pendingBundleIDs.count)"
+    )
+    return result
   }
 
   // MARK: - Space Filtering
@@ -277,7 +336,116 @@ public final class WindowLayoutStore {
     }
   }
 
-  private static func key(_ spaceUUID: String, _ displayUUID: String) -> String {
-    "\(spaceUUID)|\(displayUUID)"
+  private func persistWorkspaceLayouts() {
+    if let data = try? JSONEncoder().encode(workspaceLayouts) {
+      defaults.set(data, forKey: workspaceLayoutsKey)
+    }
+  }
+
+  private func setWorkspaceFrame(
+    bundleID: String,
+    frame: WindowFrame,
+    workspaceID: String,
+    displayUUID: String
+  ) {
+    let key = Self.key(workspaceID, displayUUID)
+    var layout =
+      workspaceLayouts[key]
+      ?? WorkspaceDisplayLayout(workspaceID: workspaceID, displayUUID: displayUUID)
+    layout.apps[bundleID] = frame
+    layout.capturedAt = Date()
+    workspaceLayouts[key] = layout
+    persistWorkspaceLayouts()
+  }
+
+  private func apply(
+    apps: [String: WindowFrame],
+    targetSpaceUUID: String,
+    displayUUID: String,
+    requestedBundleIDs: Set<String>?
+  ) -> WorkspaceLayoutRestoreAttempt {
+    let availableBundleIDs = Set(apps.keys)
+    let candidateBundleIDs =
+      requestedBundleIDs.map { $0.intersection(availableBundleIDs) } ?? availableBundleIDs
+    var pendingBundleIDs = candidateBundleIDs
+
+    guard let screen = spaceballsScreen(forDisplayUUID: displayUUID) else {
+      Diagnostics.log("layout-restore", "display not attached")
+      return WorkspaceLayoutRestoreAttempt(
+        hasLayout: true, movedWindows: 0,
+        restoredBundleIDs: [], pendingBundleIDs: pendingBundleIDs)
+    }
+    guard let targetSpaceID = spaceID(forUUID: targetSpaceUUID) else {
+      Diagnostics.log("layout-restore", "target Space UUID unresolved")
+      return WorkspaceLayoutRestoreAttempt(
+        hasLayout: true, movedWindows: 0,
+        restoredBundleIDs: [], pendingBundleIDs: pendingBundleIDs)
+    }
+
+    let origin = spaceballsAXOrigin(of: screen)
+    var movedWindows = 0
+    var restoredBundleIDs: Set<String> = []
+
+    Diagnostics.log(
+      "layout-restore",
+      "applying layout apps=\(candidateBundleIDs.count) targetSpaceID=\(targetSpaceID)")
+
+    for bundleID in candidateBundleIDs {
+      guard let relative = apps[bundleID] else { continue }
+      let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+      if runningApps.isEmpty {
+        Diagnostics.log("layout-restore", "waiting — app not running", app: bundleID)
+        continue
+      }
+
+      let absolute = CGRect(
+        x: origin.x + CGFloat(relative.x),
+        y: origin.y + CGFloat(relative.y),
+        width: CGFloat(relative.width),
+        height: CGFloat(relative.height))
+
+      for app in runningApps {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        var ref: CFTypeRef?
+        guard
+          AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &ref) == .success,
+          let windows = ref as? [AXUIElement]
+        else {
+          Diagnostics.log("layout-restore", "waiting — windows unreadable", app: bundleID)
+          continue
+        }
+
+        for window in windows {
+          var windowID: CGWindowID = 0
+          guard _AXUIElementGetWindow(window, &windowID) == .success else {
+            Diagnostics.log(
+              "layout-restore", "skip window — CGWindowID unresolved", app: bundleID)
+            continue
+          }
+          guard windowIsOnSpace(windowID: Int(windowID), spaceID: targetSpaceID) else {
+            Diagnostics.log(
+              "layout-restore",
+              "skip window=\(windowID) — not on target space \(targetSpaceID)", app: bundleID)
+            continue
+          }
+          guard
+            (try? WindowResizer.setFrame(window, frame: absolute, label: "restore")) != nil
+          else { continue }
+          movedWindows += 1
+          restoredBundleIDs.insert(bundleID)
+          pendingBundleIDs.remove(bundleID)
+        }
+      }
+    }
+
+    return WorkspaceLayoutRestoreAttempt(
+      hasLayout: true,
+      movedWindows: movedWindows,
+      restoredBundleIDs: restoredBundleIDs,
+      pendingBundleIDs: pendingBundleIDs)
+  }
+
+  private static func key(_ identity: String, _ displayUUID: String) -> String {
+    "\(identity)|\(displayUUID)"
   }
 }
