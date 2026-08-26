@@ -282,4 +282,125 @@ struct WorkspaceRestorerTests {
         preexistingWindowIDs: preexistingWindowIDs,
         allowsExistingWindow: true))
   }
+
+  @Test("Cold-launch windows are discovered by bundle ID without taking focus")
+  func coldLaunchWindowsAreDiscoveredWithoutFocus() {
+    let preexisting = WindowInfo(
+      id: 700, ownerName: "iTerm2", name: "Existing", pid: 200,
+      bounds: .zero, spaceIDs: [202])
+    let coldLaunchWindow = WindowInfo(
+      id: 701, ownerName: "iTerm2", name: "Work", pid: 200,
+      bounds: .zero, spaceIDs: [202])
+    let coldLaunchDefaultWindow = WindowInfo(
+      id: 702, ownerName: "iTerm2", name: "Default", pid: 200,
+      bounds: .zero, spaceIDs: [202])
+    let focusedIntelliJWindow = WindowInfo(
+      id: 800, ownerName: "IntelliJ IDEA", name: "Work", pid: 300,
+      bounds: .zero, spaceIDs: [101])
+
+    let windows = WorkspaceRestorer.newLauncherWindows(
+      in: [
+        101: [focusedIntelliJWindow],
+        202: [preexisting, coldLaunchWindow, coldLaunchDefaultWindow],
+      ],
+      bundleID: "com.googlecode.iterm2",
+      preexistingWindowIDs: [700],
+      bundleIDForPID: { pid in
+        switch pid {
+        case 200: "com.googlecode.iterm2"
+        case 300: "com.jetbrains.intellij"
+        default: nil
+        }
+      })
+
+    #expect(windows.map(\.id) == [701, 702])
+  }
+
+  @Test("Cold-launch iTerm windows are relocated while another app retains focus")
+  func coldLaunchITermWindowsAreRelocatedWithoutFocus() throws {
+    let target = space(id: 101, uuid: "space-work")
+    let names = makeNameStore([target.uuid: "Work"])
+    let preexisting = WindowInfo(
+      id: 700, ownerName: "iTerm2", name: "Existing", pid: 200,
+      bounds: .zero, spaceIDs: [202])
+    let focusedIntelliJWindow = WindowInfo(
+      id: 800, ownerName: "IntelliJ IDEA", name: "Work", pid: 300,
+      bounds: .zero, spaceIDs: [target.id])
+    let coldLaunchWindows = [
+      WindowInfo(
+        id: 701, ownerName: "iTerm2", name: "Work", pid: 200,
+        bounds: .zero, spaceIDs: [202]),
+      WindowInfo(
+        id: 702, ownerName: "iTerm2", name: "Default", pid: 200,
+        bounds: .zero, spaceIDs: [202]),
+    ]
+    var launched = false
+    var focusedWindowAttempts = 0
+    var relocatedWindowIDs: [Int] = []
+
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 },
+      allSpaces: { [target] },
+      windowsBySpace: {
+        var windows = [
+          target.id: [focusedIntelliJWindow],
+          202: [preexisting],
+        ]
+        if launched {
+          windows[202]?.append(contentsOf: coldLaunchWindows)
+        }
+        return windows
+      },
+      switchToSpace: { _ in },
+      clickDesktop: { _ in },
+      executeLauncher: { _, _ in launched = true },
+      relocateFocusedWindow: { _, _, _, _ in
+        focusedWindowAttempts += 1
+        return .waiting
+      },
+      bundleIDForPID: { pid in
+        switch pid {
+        case 200: "com.googlecode.iterm2"
+        case 300: "com.jetbrains.intellij"
+        default: nil
+        }
+      },
+      relocateWindow: { windowID, targetSpaceID in
+        #expect(targetSpaceID == target.id)
+        relocatedWindowIDs.append(windowID)
+        return true
+      },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: names,
+      windowLayoutRestorer: nil,
+      hooks: hooks)
+
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "workspace-1", name: "Work", path: nil,
+          launchers: [
+            LauncherData(
+              label: "Terminal", type: "applescript", command: "iTerm",
+              appName: "iTerm", bundleID: "com.googlecode.iterm2")
+          ])
+      ],
+      defaultNames: ["Work"])
+
+    #expect(relocatedWindowIDs == [701, 702])
+    #expect(focusedWindowAttempts == 0)
+  }
+
+  @Test("AppleScript launcher failures are surfaced")
+  func appleScriptLauncherFailuresAreSurfaced() {
+    do {
+      try WorkspaceRestorer.executeLauncher(
+        type: "applescript",
+        command: "error \"cold launch failed\" number 42")
+      Issue.record("Expected the failing AppleScript launcher to throw")
+    } catch {
+      #expect(error.localizedDescription.contains("cold launch failed"))
+    }
+  }
 }

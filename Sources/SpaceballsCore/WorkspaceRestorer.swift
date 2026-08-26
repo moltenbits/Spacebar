@@ -30,6 +30,8 @@ struct WorkspaceRestorerHooks {
   var clickDesktop: (UInt64) -> Void
   var executeLauncher: (String, String) throws -> Void
   var relocateFocusedWindow: (String, UInt64, Set<Int>, Bool) throws -> WorkspaceLauncherPlacement
+  var bundleIDForPID: (Int) -> String? = { _ in nil }
+  var relocateWindow: (Int, UInt64) throws -> Bool = { _, _ in false }
   var sleep: (TimeInterval) -> Void
 }
 
@@ -63,6 +65,15 @@ public final class WorkspaceRestorer {
           preexistingWindowIDs: preexistingWindowIDs,
           allowsExistingWindow: allowsExistingWindow,
           spaceManager: spaceManager)
+      },
+      bundleIDForPID: { pid in
+        ProcessBundleIdentifierResolver.resolve(pid: pid)
+      },
+      relocateWindow: { windowID, targetSpaceID in
+        try spaceManager.moveWindowToSpace(
+          windowID: windowID,
+          targetSpaceID: targetSpaceID,
+          activateAfterMove: false)
       },
       sleep: { Thread.sleep(forTimeInterval: $0) })
     self.init(
@@ -247,6 +258,26 @@ public final class WorkspaceRestorer {
   ) throws {
     let maximumAttempts = 12
     for attempt in 0..<maximumAttempts {
+      let newWindows = Self.newLauncherWindows(
+        in: hooks.windowsBySpace(),
+        bundleID: bundleID,
+        preexistingWindowIDs: preexistingWindowIDs,
+        bundleIDForPID: hooks.bundleIDForPID)
+      if !newWindows.isEmpty {
+        for window in newWindows where !window.spaceIDs.contains(targetSpaceID) {
+          Diagnostics.log(
+            "workspace-restore",
+            "relocating discovered launcher window=\(window.id) to space=\(targetSpaceID)",
+            app: bundleID)
+          let moved = try hooks.relocateWindow(window.id, targetSpaceID)
+          guard moved else {
+            throw WorkspaceRestorerError.windowRelocationFailed(
+              windowID: window.id, targetSpaceID: targetSpaceID)
+          }
+        }
+        return
+      }
+
       switch try hooks.relocateFocusedWindow(
         bundleID, targetSpaceID, preexistingWindowIDs, allowsExistingWindow)
       {
@@ -264,6 +295,22 @@ public final class WorkspaceRestorer {
       app: bundleID)
   }
 
+  static func newLauncherWindows(
+    in windowsBySpace: [UInt64: [WindowInfo]],
+    bundleID: String,
+    preexistingWindowIDs: Set<Int>,
+    bundleIDForPID: (Int) -> String?
+  ) -> [WindowInfo] {
+    var windowsByID: [Int: WindowInfo] = [:]
+    for window in windowsBySpace.values.joined()
+    where !preexistingWindowIDs.contains(window.id)
+      && bundleIDForPID(window.pid) == bundleID
+    {
+      windowsByID[window.id] = window
+    }
+    return windowsByID.values.sorted { $0.id < $1.id }
+  }
+
   private static func relocateFocusedWindow(
     bundleID: String,
     targetSpaceID: UInt64,
@@ -276,8 +323,7 @@ public final class WorkspaceRestorer {
         "workspace-restore", "launcher has no resolvable focused window", app: bundleID)
       return .waiting
     }
-    let focusedBundleID =
-      NSRunningApplication(processIdentifier: focused.pid)?.bundleIdentifier ?? ""
+    let focusedBundleID = ProcessBundleIdentifierResolver.resolve(pid: Int(focused.pid)) ?? ""
     guard focusedBundleID == bundleID else {
       Diagnostics.log(
         "workspace-restore",
@@ -325,28 +371,54 @@ public final class WorkspaceRestorer {
     allowsExistingWindow || !preexistingWindowIDs.contains(windowID)
   }
 
-  private static func executeLauncher(type: String, command: String) throws {
+  static func executeLauncher(type: String, command: String) throws {
     let process = Process()
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = pipe
+    var outputPipe: Pipe?
+    var waitsForExit = false
 
     switch type {
     case "shell":
       process.executableURL = URL(fileURLWithPath: "/bin/zsh")
       process.arguments = ["-c", command]
+      process.standardOutput = FileHandle.nullDevice
+      process.standardError = FileHandle.nullDevice
     case "applescript":
       process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
       process.arguments = ["-e", command]
+      waitsForExit = true
     case "open":
       process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
       process.arguments = ["-a", command]
+      waitsForExit = true
     default:
       throw WorkspaceRestorerError.unknownLaunchType(type)
     }
 
+    if waitsForExit {
+      let pipe = Pipe()
+      process.standardOutput = pipe
+      process.standardError = pipe
+      outputPipe = pipe
+    }
+
     try process.run()
-    // Don't wait for completion — apps should stay running
+    guard let outputPipe else {
+      // Shell launchers may intentionally remain alive for the lifetime of the
+      // launched app, so they stay fire-and-forget.
+      return
+    }
+
+    outputPipe.fileHandleForWriting.closeFile()
+    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus != 0 else { return }
+
+    let output = String(decoding: outputData, as: UTF8.self)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    throw WorkspaceRestorerError.launcherFailed(
+      type: type,
+      status: process.terminationStatus,
+      output: output)
   }
 }
 
@@ -403,12 +475,16 @@ public struct LauncherData {
 
 public enum WorkspaceRestorerError: Error, LocalizedError {
   case unknownLaunchType(String)
+  case launcherFailed(type: String, status: Int32, output: String)
   case windowRelocationFailed(windowID: Int, targetSpaceID: UInt64)
 
   public var errorDescription: String? {
     switch self {
     case .unknownLaunchType(let type):
       return "Unknown launch type: \(type)"
+    case .launcherFailed(let type, let status, let output):
+      let detail = output.isEmpty ? "no error output" : output
+      return "\(type) launcher exited with status \(status): \(detail)"
     case .windowRelocationFailed(let windowID, let targetSpaceID):
       return "Failed to move window \(windowID) to Space \(targetSpaceID)"
     }
