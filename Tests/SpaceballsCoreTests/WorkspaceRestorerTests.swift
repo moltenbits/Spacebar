@@ -392,6 +392,60 @@ struct WorkspaceRestorerTests {
     #expect(focusedWindowAttempts == 0)
   }
 
+  @Test("Launcher windows missing from the panel inventory are still relocated")
+  func launcherWindowsMissingFromPanelAreRelocated() throws {
+    let target = space(id: 101, uuid: "space-work")
+    let names = makeNameStore([target.uuid: "Work"])
+    let existingWindow = WorkspaceLauncherWindow(id: 700, spaceIDs: [202])
+    let newWindow = WorkspaceLauncherWindow(id: 701, spaceIDs: [202])
+    var launched = false
+    var focusedWindowAttempts = 0
+    var relocatedWindowIDs: [Int] = []
+
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 },
+      allSpaces: { [target] },
+      // Reproduces the reboot failure: iTerm's windows never appear in the
+      // normal inventory that feeds the Spaceballs app panel.
+      windowsBySpace: { [:] },
+      launcherWindows: { bundleID in
+        #expect(bundleID == "com.googlecode.iterm2")
+        return launched ? [existingWindow, newWindow] : [existingWindow]
+      },
+      switchToSpace: { _ in },
+      clickDesktop: { _ in },
+      executeLauncher: { _, _ in launched = true },
+      relocateFocusedWindow: { _, _, _, _ in
+        focusedWindowAttempts += 1
+        return .waiting
+      },
+      relocateWindow: { windowID, targetSpaceID in
+        #expect(targetSpaceID == target.id)
+        relocatedWindowIDs.append(windowID)
+        return true
+      },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: names,
+      windowLayoutRestorer: nil,
+      hooks: hooks)
+
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "workspace-1", name: "Work", path: nil,
+          launchers: [
+            LauncherData(
+              label: "Terminal", type: "applescript", command: "iTerm",
+              appName: "iTerm", bundleID: "com.googlecode.iterm2")
+          ])
+      ],
+      defaultNames: ["Work"])
+
+    #expect(relocatedWindowIDs == [701])
+    #expect(focusedWindowAttempts == 0)
+  }
+
   @Test("AppleScript launcher failures are surfaced")
   func appleScriptLauncherFailuresAreSurfaced() {
     do {

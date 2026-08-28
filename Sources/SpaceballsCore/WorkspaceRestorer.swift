@@ -22,10 +22,16 @@ enum WorkspaceLauncherPlacement: Equatable {
   case relocated
 }
 
+struct WorkspaceLauncherWindow: Equatable {
+  let id: Int
+  let spaceIDs: [UInt64]
+}
+
 struct WorkspaceRestorerHooks {
   var createDefaultSpaces: ([String], SpaceNameStoring) throws -> Int
   var allSpaces: () -> [SpaceInfo]
   var windowsBySpace: () -> [UInt64: [WindowInfo]]
+  var launcherWindows: (String) -> [WorkspaceLauncherWindow] = { _ in [] }
   var switchToSpace: (UInt64) throws -> Void
   var clickDesktop: (UInt64) -> Void
   var executeLauncher: (String, String) throws -> Void
@@ -54,6 +60,9 @@ public final class WorkspaceRestorer {
       },
       allSpaces: { spaceManager.getAllSpaces() },
       windowsBySpace: { spaceManager.windowsBySpace().1 },
+      launcherWindows: { bundleID in
+        Self.accessibilityWindows(bundleID: bundleID, spaceManager: spaceManager)
+      },
       switchToSpace: { try spaceManager.switchToSpace(id: $0) },
       clickDesktop: { spaceManager.clickDesktopOnDisplay(forSpaceID: $0) },
       executeLauncher: { try Self.executeLauncher(type: $0, command: $1) },
@@ -170,8 +179,12 @@ public final class WorkspaceRestorer {
       // Launch only missing apps
       var focusFailed = false
       for (launcherIndex, launcher) in missingLaunchers.enumerated() {
-        let preexistingWindowIDs = Set(
+        var preexistingWindowIDs = Set(
           hooks.windowsBySpace().values.flatMap { $0 }.map(\.id))
+        if !launcher.bundleID.isEmpty {
+          preexistingWindowIDs.formUnion(
+            hooks.launcherWindows(launcher.bundleID).map(\.id))
+        }
         let resolved = launcher.resolvedCommand(path: workspace.path, name: workspace.name)
         do {
           try hooks.executeLauncher(launcher.type, resolved)
@@ -258,11 +271,22 @@ public final class WorkspaceRestorer {
   ) throws {
     let maximumAttempts = 12
     for attempt in 0..<maximumAttempts {
-      let newWindows = Self.newLauncherWindows(
+      var newWindows = hooks.launcherWindows(bundleID).filter {
+        !preexistingWindowIDs.contains($0.id)
+      }
+      let inventoryWindows = Self.newLauncherWindows(
         in: hooks.windowsBySpace(),
         bundleID: bundleID,
         preexistingWindowIDs: preexistingWindowIDs,
-        bundleIDForPID: hooks.bundleIDForPID)
+        bundleIDForPID: hooks.bundleIDForPID
+      )
+      .map { WorkspaceLauncherWindow(id: $0.id, spaceIDs: $0.spaceIDs) }
+      let accessibilityWindowIDs = Set(newWindows.map(\.id))
+      newWindows.append(
+        contentsOf: inventoryWindows.filter {
+          !accessibilityWindowIDs.contains($0.id)
+        })
+      newWindows.sort { $0.id < $1.id }
       if !newWindows.isEmpty {
         for window in newWindows where !window.spaceIDs.contains(targetSpaceID) {
           Diagnostics.log(
@@ -308,6 +332,34 @@ public final class WorkspaceRestorer {
     {
       windowsByID[window.id] = window
     }
+    return windowsByID.values.sorted { $0.id < $1.id }
+  }
+
+  private static func accessibilityWindows(
+    bundleID: String,
+    spaceManager: SpaceManager
+  ) -> [WorkspaceLauncherWindow] {
+    var windowsByID: [Int: WorkspaceLauncherWindow] = [:]
+
+    for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) {
+      let appElement = AXUIElementCreateApplication(app.processIdentifier)
+      var windowsRef: CFTypeRef?
+      guard
+        AXUIElementCopyAttributeValue(
+          appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+        let windows = windowsRef as? [AXUIElement]
+      else { continue }
+
+      for window in windows {
+        var windowID: CGWindowID = 0
+        guard _AXUIElementGetWindow(window, &windowID) == .success else { continue }
+        let id = Int(windowID)
+        windowsByID[id] = WorkspaceLauncherWindow(
+          id: id,
+          spaceIDs: spaceManager.spaceIDs(forWindowID: id))
+      }
+    }
+
     return windowsByID.values.sorted { $0.id < $1.id }
   }
 
