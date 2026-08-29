@@ -29,6 +29,7 @@ public struct WindowInfo {
   public let bounds: CGRect
   public let spaceIDs: [UInt64]
   public let isOnscreen: Bool
+  public let isMinimized: Bool
 
   /// Window appears on multiple spaces (e.g. "Assign to All Desktops")
   public var isSticky: Bool { spaceIDs.count > 1 }
@@ -36,7 +37,7 @@ public struct WindowInfo {
   public init(
     id: Int, ownerName: String, name: String?,
     pid: Int, bounds: CGRect, spaceIDs: [UInt64],
-    isOnscreen: Bool = true
+    isOnscreen: Bool = true, isMinimized: Bool = false
   ) {
     self.id = id
     self.ownerName = ownerName
@@ -45,6 +46,7 @@ public struct WindowInfo {
     self.bounds = bounds
     self.spaceIDs = spaceIDs
     self.isOnscreen = isOnscreen
+    self.isMinimized = isMinimized
   }
 }
 
@@ -171,6 +173,7 @@ public class SpaceManager {
 
     // Cache activation policy per PID to avoid repeated lookups.
     var appInfoCache: [pid_t: AppInfo?] = [:]
+    var minimizedIDsByPID: [pid_t: Set<CGWindowID>?] = [:]
 
     var windows: [WindowInfo] = []
 
@@ -207,6 +210,15 @@ public class SpaceManager {
 
       let spaceIDs = dataSource.fetchSpacesForWindow(windowID)
       let isOnscreen = entry[kCGWindowIsOnscreen as String] as? Bool ?? false
+      let minimizedIDs: Set<CGWindowID>?
+      if isOnscreen {
+        minimizedIDs = nil
+      } else if let cached = minimizedIDsByPID[pidT] {
+        minimizedIDs = cached
+      } else {
+        minimizedIDs = dataSource.minimizedAXWindowIDs(pid: pidT)
+        minimizedIDsByPID[pidT] = minimizedIDs
+      }
 
       windows.append(
         WindowInfo(
@@ -216,7 +228,8 @@ public class SpaceManager {
           pid: pid,
           bounds: bounds,
           spaceIDs: spaceIDs,
-          isOnscreen: isOnscreen
+          isOnscreen: isOnscreen,
+          isMinimized: minimizedIDs?.contains(CGWindowID(windowID)) == true
         ))
     }
 
@@ -266,6 +279,11 @@ public class SpaceManager {
     let result = windows.filter { window in
       // On-screen ⟹ on an active Space and visible ⟹ definitely a live window.
       if window.isOnscreen {
+        tombstones.remove(window.id)
+        return true
+      }
+      // A window positively identified as minimized is necessarily still live.
+      if window.isMinimized {
         tombstones.remove(window.id)
         return true
       }

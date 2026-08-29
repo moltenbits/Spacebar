@@ -16,6 +16,7 @@ struct MockDataSource: SystemDataSource {
   /// (AX unavailable → conservative keep); map to an explicit set (possibly
   /// empty) to simulate a queryable app.
   var liveWindowIDsByPID: [Int: Set<CGWindowID>] = [:]
+  var minimizedWindowIDsByPID: [Int: Set<CGWindowID>] = [:]
   /// App info per pid. A pid absent from this map returns `nil` (no
   /// LaunchServices-registered app → windows kept).
   var appInfoByPID: [Int: AppInfo] = [:]
@@ -38,6 +39,10 @@ struct MockDataSource: SystemDataSource {
 
   func liveAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? {
     liveWindowIDsByPID[Int(pid)]
+  }
+
+  func minimizedAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? {
+    minimizedWindowIDsByPID[Int(pid)]
   }
 
   func appInfo(pid: pid_t) -> AppInfo? {
@@ -505,6 +510,26 @@ struct WindowFilteringTests {
     #expect(windows[0].id == 1)
     #expect(windows[0].ownerName == "Safari")
     #expect(windows[0].name == "Google")
+  }
+
+  @Test("Marks only windows reported minimized by Accessibility")
+  func minimizedWindowState() {
+    var ds = MockDataSource()
+    ds.windowList = [
+      makeWindowDict(id: 1, ownerName: "Safari", name: "Visible", pid: 100),
+      makeWindowDict(
+        id: 2, ownerName: "Safari", name: "Minimized", pid: 100, isOnscreen: false),
+      makeWindowDict(
+        id: 3, ownerName: "Terminal", name: "Other Space", pid: 200, isOnscreen: false),
+    ]
+    ds.windowSpaces = [1: [10], 2: [10], 3: [20]]
+    ds.minimizedWindowIDsByPID = [100: [2], 200: []]
+
+    let windows = SpaceManager(dataSource: ds).getAllWindows()
+
+    #expect(windows.first(where: { $0.id == 1 })?.isMinimized == false)
+    #expect(windows.first(where: { $0.id == 2 })?.isMinimized == true)
+    #expect(windows.first(where: { $0.id == 3 })?.isMinimized == false)
   }
 
   @Test("Filters out non-layer-0 windows")

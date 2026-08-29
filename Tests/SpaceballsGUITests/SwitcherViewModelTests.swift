@@ -51,6 +51,7 @@ struct MockDataSource: SystemDataSource {
   var windowList: [[String: Any]] = []
   var onScreenWindowList: [[String: Any]]?
   var windowSpaces: [Int: [UInt64]] = [:]
+  var minimizedWindowIDsByPID: [Int: Set<CGWindowID>] = [:]
 
   func fetchManagedDisplaySpaces() -> [[String: Any]] {
     displaySpaces
@@ -66,6 +67,10 @@ struct MockDataSource: SystemDataSource {
 
   func fetchSpacesForWindow(_ windowID: Int) -> [UInt64] {
     windowSpaces[windowID] ?? []
+  }
+
+  func minimizedAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? {
+    minimizedWindowIDsByPID[Int(pid)]
   }
 }
 
@@ -800,14 +805,33 @@ struct SelectionNavigationTests {
       spaceManager: SpaceManager(dataSource: ds),
       minimizeWindow: { minimizedWindowIDs.append($0) })
     vm.refresh()
-    vm.selectedItem = .windowRow(11)
-    let rowsBefore = vm.flatFilteredRows.map(\.id)
+    vm.selectedItem = .windowRow(10)
 
     vm.minimizeSelectedWindow()
 
-    #expect(minimizedWindowIDs == [11])
-    #expect(vm.flatFilteredRows.map(\.id) == rowsBefore)
-    #expect(vm.selectedItem == .windowRow(11))
+    #expect(minimizedWindowIDs == [10])
+    #expect(vm.sections.first(where: { $0.id == 1 })?.windows.map(\.id) == [11, 10])
+    #expect(vm.flatFilteredRows.first(where: { $0.id == 10 })?.isMinimized == true)
+    #expect(vm.selectedItem == .windowRow(10))
+  }
+
+  @Test("Minimized windows are placed last when the panel refreshes")
+  func minimizedWindowsSortLastOnRefresh() {
+    var ds = makeTwoSpaceDataSource()
+    ds.windowList = [
+      makeWindowDict(id: 20, ownerName: "Terminal", name: "bash", pid: 200),
+      makeWindowDict(
+        id: 10, ownerName: "Safari", name: "Google", pid: 100, isOnscreen: false),
+      makeWindowDict(id: 11, ownerName: "Safari", name: "GitHub", pid: 100),
+    ]
+    ds.minimizedWindowIDsByPID = [100: [10]]
+    let vm = makeTestSwitcherViewModel(spaceManager: SpaceManager(dataSource: ds))
+
+    vm.refresh()
+
+    let space = vm.sections.first(where: { $0.id == 1 })
+    #expect(space?.windows.map(\.id) == [11, 10])
+    #expect(space?.windows.map(\.isMinimized) == [false, true])
   }
 
   @Test("Minimize on a non-window row is a no-op")

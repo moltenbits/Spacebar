@@ -39,10 +39,11 @@ public struct SwitcherRow: Identifiable {
   public let appIcon: NSImage?
   public let pid: Int
   public let isSticky: Bool
+  public var isMinimized: Bool
 
   public init(
     id: Int, appName: String, windowTitle: String,
-    appIcon: NSImage?, pid: Int, isSticky: Bool
+    appIcon: NSImage?, pid: Int, isSticky: Bool, isMinimized: Bool = false
   ) {
     self.id = id
     self.appName = appName
@@ -50,6 +51,7 @@ public struct SwitcherRow: Identifiable {
     self.appIcon = appIcon
     self.pid = pid
     self.isSticky = isSticky
+    self.isMinimized = isMinimized
   }
 }
 
@@ -1846,9 +1848,25 @@ public final class SwitcherViewModel: ObservableObject {
 
     do {
       try minimizeWindow(windowID)
+      markWindowMinimized(windowID)
     } catch {
       Diagnostics.log("window", "minimize \(windowID) failed: \(error)")
     }
+  }
+
+  private func markWindowMinimized(_ windowID: Int) {
+    var updated = sections
+    guard
+      let sectionIndex = updated.firstIndex(where: {
+        $0.windows.contains(where: { $0.id == windowID })
+      }),
+      let rowIndex = updated[sectionIndex].windows.firstIndex(where: { $0.id == windowID })
+    else { return }
+
+    var row = updated[sectionIndex].windows.remove(at: rowIndex)
+    row.isMinimized = true
+    updated[sectionIndex].windows.append(row)
+    sections = updated
   }
 
   /// Closes the currently selected window and refreshes the list.
@@ -1977,17 +1995,22 @@ public final class SwitcherViewModel: ObservableObject {
   // MARK: - Helpers
 
   private func reorderByMRU(_ windows: [WindowInfo]) -> [WindowInfo] {
-    guard !windowMRUHistory.isEmpty else { return windows }
-    var mruRank: [Int: Int] = [:]
-    for (index, wid) in windowMRUHistory.enumerated() {
-      mruRank[wid] = index
+    let ordered: [WindowInfo]
+    if windowMRUHistory.isEmpty {
+      ordered = windows
+    } else {
+      var mruRank: [Int: Int] = [:]
+      for (index, wid) in windowMRUHistory.enumerated() {
+        mruRank[wid] = index
+      }
+      let maxRank = windowMRUHistory.count
+      ordered = windows.enumerated().sorted { a, b in
+        let aRank = mruRank[a.element.id] ?? (maxRank + a.offset)
+        let bRank = mruRank[b.element.id] ?? (maxRank + b.offset)
+        return aRank < bRank
+      }.map(\.element)
     }
-    let maxRank = windowMRUHistory.count
-    return windows.enumerated().sorted { a, b in
-      let aRank = mruRank[a.element.id] ?? (maxRank + a.offset)
-      let bRank = mruRank[b.element.id] ?? (maxRank + b.offset)
-      return aRank < bRank
-    }.map(\.element)
+    return ordered.filter { !$0.isMinimized } + ordered.filter(\.isMinimized)
   }
 
   private func makeRow(from window: WindowInfo) -> SwitcherRow {
@@ -2009,7 +2032,8 @@ public final class SwitcherViewModel: ObservableObject {
       windowTitle: window.name ?? "",
       appIcon: icon,
       pid: window.pid,
-      isSticky: window.isSticky
+      isSticky: window.isSticky,
+      isMinimized: window.isMinimized
     )
   }
 }

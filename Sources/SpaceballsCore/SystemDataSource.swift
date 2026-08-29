@@ -41,6 +41,10 @@ public protocol SystemDataSource {
   /// keep the window rather than dropping it.
   func liveAXWindowIDs(pid: pid_t) -> Set<CGWindowID>?
 
+  /// Returns the CGWindowIDs that Accessibility currently reports as minimized
+  /// for the given process. `nil` means the state could not be determined.
+  func minimizedAXWindowIDs(pid: pid_t) -> Set<CGWindowID>?
+
   /// Returns the activation policy and bundle identifier of the application
   /// owning `pid`, or `nil` when the pid maps to no LaunchServices-registered
   /// application. Callers MUST treat `nil` as "keep the window": most pids
@@ -54,6 +58,9 @@ extension SystemDataSource {
   /// Default: liveness unknown. Conforming types that can answer (the real CGS
   /// data source, and tests) override this; everyone else keeps every window.
   public func liveAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? { nil }
+
+  /// Default: minimization state unknown.
+  public func minimizedAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? { nil }
 
   /// Default: no LaunchServices registration known, so windows are kept.
   public func appInfo(pid: pid_t) -> AppInfo? { nil }
