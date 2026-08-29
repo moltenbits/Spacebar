@@ -797,8 +797,8 @@ struct SelectionNavigationTests {
     #expect(vm.selectedItem == .spaceHeader(1))
   }
 
-  @Test("Minimizing a window preserves the panel rows and selection")
-  func minimizePreservesPanelState() {
+  @Test("Minimizing a window moves selection to the next app")
+  func minimizeSelectsNextApp() {
     let ds = makeTwoSpaceDataSource()
     var minimizedWindowIDs: [Int] = []
     let vm = makeTestSwitcherViewModel(
@@ -812,7 +812,44 @@ struct SelectionNavigationTests {
     #expect(minimizedWindowIDs == [10])
     #expect(vm.sections.first(where: { $0.id == 1 })?.windows.map(\.id) == [11, 10])
     #expect(vm.flatFilteredRows.first(where: { $0.id == 10 })?.isMinimized == true)
+    #expect(vm.selectedItem == .windowRow(11))
+  }
+
+  @Test("Minimizing the last app wraps selection to the first app")
+  func minimizeLastAppWrapsSelection() {
+    let ds = makeTwoSpaceDataSource()
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: ds),
+      minimizeWindow: { _ in })
+    vm.refresh()
+    vm.selectedItem = .windowRow(20)
+
+    vm.minimizeSelectedWindow()
+
     #expect(vm.selectedItem == .windowRow(10))
+  }
+
+  @Test("Minimizing the only app keeps it selected")
+  func minimizeOnlyAppKeepsSelection() {
+    var ds = MockDataSource()
+    ds.displaySpaces = [
+      makeDisplayDict(
+        displayUUID: "display-1",
+        spaces: [makeSpaceDict(id: 1, uuid: "uuid-1")],
+        currentSpaceID: 1)
+    ]
+    ds.windowList = [makeWindowDict(id: 10, ownerName: "Safari", name: "Google")]
+    ds.windowSpaces = [10: [1]]
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: ds),
+      minimizeWindow: { _ in })
+    vm.refresh()
+    vm.selectedItem = .windowRow(10)
+
+    vm.minimizeSelectedWindow()
+
+    #expect(vm.selectedItem == .windowRow(10))
+    #expect(vm.flatFilteredRows.first?.isMinimized == true)
   }
 
   @Test("Minimized windows are placed last when the panel refreshes")

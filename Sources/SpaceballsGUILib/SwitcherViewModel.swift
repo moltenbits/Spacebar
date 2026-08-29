@@ -1839,16 +1839,25 @@ public final class SwitcherViewModel: ObservableObject {
 
   // MARK: - Close / Quit / Minimize
 
-  /// Minimizes the currently selected window without removing its row or
-  /// changing the selection, so the panel remains ready for another action.
+  /// Minimizes the currently selected window and advances to the next window,
+  /// so the panel remains ready for another action.
   public func minimizeSelectedWindow() {
-    guard case .windowRow(let windowID) = selectedItem,
-      flatFilteredRows.contains(where: { $0.id == windowID })
-    else { return }
+    guard case .windowRow(let windowID) = selectedItem else { return }
+    let rowsBeforeMinimize = flatFilteredRows
+    guard let selectedIndex = rowsBeforeMinimize.firstIndex(where: { $0.id == windowID }) else {
+      return
+    }
+    let nextWindowID =
+      rowsBeforeMinimize.count > 1
+      ? rowsBeforeMinimize[(selectedIndex + 1) % rowsBeforeMinimize.count].id
+      : nil
 
     do {
       try minimizeWindow(windowID)
       markWindowMinimized(windowID)
+      if let nextWindowID {
+        selectedItem = .windowRow(nextWindowID)
+      }
     } catch {
       Diagnostics.log("window", "minimize \(windowID) failed: \(error)")
     }
