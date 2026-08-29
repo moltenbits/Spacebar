@@ -13,6 +13,7 @@ protocol KeyInterceptorDelegate: AnyObject {
   func keyInterceptorCloseWindow()
   func keyInterceptorQuitApp()
   func keyInterceptorMinimizeWindow()
+  func keyInterceptorMinimizeSpace()
   func keyInterceptorMoveDisplay(_ direction: ArrangementDirection)
   func keyInterceptorJumpToNextSpace()
   func keyInterceptorJumpToPreviousSpace()
@@ -444,10 +445,16 @@ private func keyInterceptorCallback(
       return nil  // consume
     }
 
-    // Minimize the selected window while leaving the panel open.
-    if cmdExact && keyCode == Int64(bindings.minimizeWindow) && interceptor.panelVisible {
+    // Minimize the selected window (Cmd) or every window in its Space (Cmd+Shift).
+    if (cmdExact || cmdShiftExact) && interceptor.panelVisible,
+      let command = bindings.minimizeCommand(
+        keyCode: UInt16(keyCode), shiftHeld: cmdShiftExact)
+    {
       DispatchQueue.main.async {
-        interceptor.delegate?.keyInterceptorMinimizeWindow()
+        switch command {
+        case .window: interceptor.delegate?.keyInterceptorMinimizeWindow()
+        case .space: interceptor.delegate?.keyInterceptorMinimizeSpace()
+        }
       }
       return nil  // consume
     }

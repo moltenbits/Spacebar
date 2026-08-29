@@ -147,6 +147,12 @@ public struct KeyBindings: Codable, Equatable {
     }
   }
 
+  /// Resolves the minimize key to its window- or Space-level action.
+  public func minimizeCommand(keyCode: UInt16, shiftHeld: Bool) -> MinimizeCommand? {
+    guard keyCode == minimizeWindow else { return nil }
+    return shiftHeld ? .space : .window
+  }
+
   /// Returns pairs of actions that share the same key code.
   public func conflicts() -> [(ShortcutAction, ShortcutAction)] {
     var seen: [UInt16: ShortcutAction] = [:]
@@ -175,6 +181,11 @@ public enum NavigationCommand: Equatable {
   case nextSpace
   case previousSpace
   case display(ArrangementDirection)
+}
+
+public enum MinimizeCommand: Equatable {
+  case window
+  case space
 }
 
 // MARK: - Shortcut Action
@@ -232,7 +243,8 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     case .cycleSortOrder: "Cycles through space sort orders"
     case .createSpace: "Opens the create space menu"
     case .closeWindow: "Closes the selected window (Shift closes the space)"
-    case .minimizeWindow: "Minimizes the selected window and keeps the panel open"
+    case .minimizeWindow:
+      "Minimizes the selected window (Shift minimizes every window in its Space)"
     case .quitApp: "Quits the app owning the selected window"
     case .moveWindow: "Marks the selected window for moving to another space"
     case .ejectSpaces:

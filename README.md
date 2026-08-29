@@ -92,7 +92,7 @@ way while building Spaceballs:
 - **Window resizing** — Cmd+Shift+D opens a grid overlay for the focused window: drag cells to resize, or apply
   configurable presets (pressing a preset again cycles it across screens)
 - **Keyboard-driven** — Cmd+Tab to cycle, Cmd+\` to go back; all shortcuts customizable in Settings
-- **Window management** — Cmd+M minimizes a window while keeping the panel open; minimized windows move to the bottom of their Space and display a faded icon. Cmd+W closes a window, and Cmd+Q quits an app
+- **Window management** — Cmd+M minimizes a window while keeping the panel open; Cmd+Shift+M minimizes every window in the selected Space. Minimized windows move to the bottom of their Space and display a faded icon. Cmd+W closes a window, and Cmd+Q quits an app
 - **Create and close spaces** - create new spaces (Cmd+N) or close existing ones (Cmd+Shift+W)
 - **Custom space names** — select a Space and press Cmd+R to rename inline (names are local to Spaceballs; macOS does not expose Space names to apps)
 - **Multi-display** — show the panel on the active display, primary display, or per display
@@ -137,6 +137,7 @@ Once running, the app lives in the background (no Dock icon). Keyboard shortcuts
 | Release Cmd (or Cmd+Enter) | Activate selected window or space |
 | Escape | Dismiss panel / cancel current mode |
 | Cmd+M | Minimize selected window, move it to the bottom of its Space, and keep the panel open |
+| Cmd+Shift+M | Minimize every window in the selected Space and select its header |
 | Cmd+X | Enter move mode (mark selected window for moving between Spaces) |
 | Cmd+Shift+X | Enter space-move mode (mark selected Space for moving between displays) |
 | Cmd+W | Close selected window |

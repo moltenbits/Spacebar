@@ -852,6 +852,88 @@ struct SelectionNavigationTests {
     #expect(vm.flatFilteredRows.first?.isMinimized == true)
   }
 
+  @Test("Minimizing a Space minimizes only its windows and selects its header")
+  func minimizeSelectedSpace() {
+    let ds = makeTwoSpaceDataSource()
+    var minimizedWindowIDs: [Int] = []
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: ds),
+      minimizeWindow: { minimizedWindowIDs.append($0) })
+    vm.refresh()
+    vm.selectedItem = .windowRow(10)
+
+    vm.minimizeSelectedSpace()
+
+    #expect(minimizedWindowIDs == [10, 11])
+    #expect(vm.sections.first(where: { $0.id == 1 })?.windows.allSatisfy(\.isMinimized) == true)
+    #expect(
+      vm.sections.first(where: { $0.id == 2 })?.windows.allSatisfy { !$0.isMinimized } == true)
+    #expect(vm.selectedItem == .spaceHeader(1))
+  }
+
+  @Test("Minimizing from a Space header skips windows already minimized")
+  func minimizeSelectedSpaceFromHeader() {
+    var ds = makeTwoSpaceDataSource()
+    ds.windowList = [
+      makeWindowDict(id: 20, ownerName: "Terminal", name: "bash", pid: 200),
+      makeWindowDict(
+        id: 10, ownerName: "Safari", name: "Google", pid: 100, isOnscreen: false),
+      makeWindowDict(id: 11, ownerName: "Safari", name: "GitHub", pid: 100),
+    ]
+    ds.minimizedWindowIDsByPID = [100: [10]]
+    var minimizedWindowIDs: [Int] = []
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: ds),
+      minimizeWindow: { minimizedWindowIDs.append($0) })
+    vm.refresh()
+    vm.selectedItem = .spaceHeader(1)
+
+    vm.minimizeSelectedSpace()
+
+    #expect(minimizedWindowIDs == [11])
+    #expect(vm.sections.first(where: { $0.id == 1 })?.windows.allSatisfy(\.isMinimized) == true)
+    #expect(vm.selectedItem == .spaceHeader(1))
+  }
+
+  @Test("Minimizing a Space continues after an individual window fails")
+  func minimizeSelectedSpaceContinuesAfterFailure() {
+    let ds = makeTwoSpaceDataSource()
+    var attemptedWindowIDs: [Int] = []
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: ds),
+      minimizeWindow: { windowID in
+        attemptedWindowIDs.append(windowID)
+        if windowID == 10 {
+          throw NSError(domain: "MinimizeTest", code: 1)
+        }
+      })
+    vm.refresh()
+    vm.selectedItem = .windowRow(10)
+
+    vm.minimizeSelectedSpace()
+
+    #expect(attemptedWindowIDs == [10, 11])
+    #expect(vm.flatFilteredRows.first(where: { $0.id == 10 })?.isMinimized == false)
+    #expect(vm.flatFilteredRows.first(where: { $0.id == 11 })?.isMinimized == true)
+    #expect(vm.selectedItem == .spaceHeader(1))
+  }
+
+  @Test("Minimizing a Space from a meta row is a no-op")
+  func minimizeSelectedSpaceFromMetaRowIsNoOp() {
+    let ds = makeTwoSpaceDataSource()
+    var minimizedWindowIDs: [Int] = []
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: ds),
+      minimizeWindow: { minimizedWindowIDs.append($0) })
+    vm.refresh()
+    vm.selectedItem = .settings
+
+    vm.minimizeSelectedSpace()
+
+    #expect(minimizedWindowIDs.isEmpty)
+    #expect(vm.selectedItem == .settings)
+  }
+
   @Test("Minimized windows are placed last when the panel refreshes")
   func minimizedWindowsSortLastOnRefresh() {
     var ds = makeTwoSpaceDataSource()

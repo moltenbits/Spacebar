@@ -839,6 +839,10 @@ extension AppDelegate: KeyInterceptorDelegate {
     viewModel.minimizeSelectedWindow()
   }
 
+  func keyInterceptorMinimizeSpace() {
+    viewModel.minimizeSelectedSpace()
+  }
+
   func keyInterceptorOpenSettings() {
     openSettings()
   }
@@ -1102,7 +1106,7 @@ extension AppDelegate: KeyInterceptorDelegate {
   }
 
   func keyInterceptorCloseSpace() {
-    guard let spaceID = viewModel.selectedSpaceForClose else { return }
+    guard let spaceID = viewModel.selectedSpaceID else { return }
 
     // Don't close the last space
     let desktopCount = viewModel.spaceManager.getAllSpaces().filter({ $0.type == .desktop }).count

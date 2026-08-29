@@ -673,8 +673,8 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   public var selectedSpaceID: UInt64? {
-    if case .spaceHeader(let id) = selectedItem { return id }
-    return nil
+    let map = windowSpaceMap()
+    return spaceID(for: selectedItem ?? .settings, using: map)
   }
 
   // MARK: - Selection
@@ -1202,14 +1202,6 @@ public final class SwitcherViewModel: ObservableObject {
 
     sortOverlayText = "Sorting: \(spaceSortOrder.label)"
     sortOverlayGeneration += 1
-  }
-
-  // MARK: - Close Space
-
-  /// Returns the space ID for the currently selected item (header or window row).
-  public var selectedSpaceForClose: UInt64? {
-    let map = windowSpaceMap()
-    return spaceID(for: selectedItem ?? .settings, using: map)
   }
 
   // MARK: - Multi-Panel Display Navigation
@@ -1863,18 +1855,35 @@ public final class SwitcherViewModel: ObservableObject {
     }
   }
 
-  private func markWindowMinimized(_ windowID: Int) {
-    var updated = sections
-    guard
-      let sectionIndex = updated.firstIndex(where: {
-        $0.windows.contains(where: { $0.id == windowID })
-      }),
-      let rowIndex = updated[sectionIndex].windows.firstIndex(where: { $0.id == windowID })
+  /// Minimizes every non-minimized window in the selected Space, then leaves
+  /// selection on that Space's header at the top of the group.
+  public func minimizeSelectedSpace() {
+    guard let spaceID = selectedSpaceID,
+      let windows = sections.first(where: { $0.id == spaceID })?.windows
     else { return }
 
-    var row = updated[sectionIndex].windows.remove(at: rowIndex)
-    row.isMinimized = true
-    updated[sectionIndex].windows.append(row)
+    for row in windows where !row.isMinimized {
+      do {
+        try minimizeWindow(row.id)
+        markWindowMinimized(row.id)
+      } catch {
+        Diagnostics.log("window", "minimize \(row.id) failed: \(error)")
+      }
+    }
+    selectedItem = .spaceHeader(spaceID)
+  }
+
+  private func markWindowMinimized(_ windowID: Int) {
+    var updated = sections
+    for sectionIndex in updated.indices {
+      guard
+        let rowIndex = updated[sectionIndex].windows.firstIndex(where: { $0.id == windowID })
+      else { continue }
+
+      var row = updated[sectionIndex].windows.remove(at: rowIndex)
+      row.isMinimized = true
+      updated[sectionIndex].windows.append(row)
+    }
     sections = updated
   }
 
