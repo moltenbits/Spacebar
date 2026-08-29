@@ -835,6 +835,10 @@ extension AppDelegate: KeyInterceptorDelegate {
     viewModel.quitSelectedApp()
   }
 
+  func keyInterceptorMinimizeWindow() {
+    viewModel.minimizeSelectedWindow()
+  }
+
   func keyInterceptorOpenSettings() {
     openSettings()
   }

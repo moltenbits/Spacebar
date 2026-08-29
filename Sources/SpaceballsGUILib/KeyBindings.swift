@@ -13,6 +13,7 @@ public struct KeyBindings: Codable, Equatable {
   public var cycleSortOrder: UInt16
   public var createSpace: UInt16
   public var closeWindow: UInt16
+  public var minimizeWindow: UInt16
   public var quitApp: UInt16
   public var moveWindow: UInt16
   public var ejectSpaces: UInt16
@@ -30,8 +31,9 @@ public struct KeyBindings: Codable, Equatable {
     cycleSortOrder: UInt16 = 1,
     createSpace: UInt16 = 45,
     closeWindow: UInt16 = 13,
+    minimizeWindow: UInt16 = 46,
     quitApp: UInt16 = 12,
-    moveWindow: UInt16 = 46,
+    moveWindow: UInt16 = 7,
     ejectSpaces: UInt16 = 14,
     showResize: UInt16 = 2,
     cancel: UInt16 = 53
@@ -46,6 +48,7 @@ public struct KeyBindings: Codable, Equatable {
     self.cycleSortOrder = cycleSortOrder
     self.createSpace = createSpace
     self.closeWindow = closeWindow
+    self.minimizeWindow = minimizeWindow
     self.quitApp = quitApp
     self.moveWindow = moveWindow
     self.ejectSpaces = ejectSpaces
@@ -66,8 +69,14 @@ public struct KeyBindings: Codable, Equatable {
     cycleSortOrder = try c.decodeIfPresent(UInt16.self, forKey: .cycleSortOrder) ?? 1
     createSpace = try c.decodeIfPresent(UInt16.self, forKey: .createSpace) ?? 45
     closeWindow = try c.decodeIfPresent(UInt16.self, forKey: .closeWindow) ?? 13
+    minimizeWindow = try c.decodeIfPresent(UInt16.self, forKey: .minimizeWindow) ?? 46
     quitApp = try c.decodeIfPresent(UInt16.self, forKey: .quitApp) ?? 12
-    moveWindow = try c.decodeIfPresent(UInt16.self, forKey: .moveWindow) ?? 46
+    let decodedMoveWindow = try c.decodeIfPresent(UInt16.self, forKey: .moveWindow)
+    moveWindow =
+      c.contains(.minimizeWindow)
+      ? (decodedMoveWindow ?? 7)
+      : Self.migrateMoveWindow(
+        decodedMoveWindow)
     ejectSpaces = try c.decodeIfPresent(UInt16.self, forKey: .ejectSpaces) ?? 14
     showResize = try c.decodeIfPresent(UInt16.self, forKey: .showResize) ?? 2
     cancel = try c.decodeIfPresent(UInt16.self, forKey: .cancel) ?? 53
@@ -76,7 +85,8 @@ public struct KeyBindings: Codable, Equatable {
   private enum CodingKeys: String, CodingKey {
     case activateAndNext, previousItem, nextSpace, previousSpace
     case nextDisplay, previousDisplay, renameSpace, cycleSortOrder
-    case createSpace, closeWindow, quitApp, moveWindow, ejectSpaces, showResize, cancel
+    case createSpace, closeWindow, minimizeWindow, quitApp, moveWindow, ejectSpaces, showResize,
+      cancel
   }
 
   public subscript(action: ShortcutAction) -> UInt16 {
@@ -92,6 +102,7 @@ public struct KeyBindings: Codable, Equatable {
       case .cycleSortOrder: cycleSortOrder
       case .createSpace: createSpace
       case .closeWindow: closeWindow
+      case .minimizeWindow: minimizeWindow
       case .quitApp: quitApp
       case .moveWindow: moveWindow
       case .ejectSpaces: ejectSpaces
@@ -111,6 +122,7 @@ public struct KeyBindings: Codable, Equatable {
       case .cycleSortOrder: cycleSortOrder = newValue
       case .createSpace: createSpace = newValue
       case .closeWindow: closeWindow = newValue
+      case .minimizeWindow: minimizeWindow = newValue
       case .quitApp: quitApp = newValue
       case .moveWindow: moveWindow = newValue
       case .ejectSpaces: ejectSpaces = newValue
@@ -149,6 +161,11 @@ public struct KeyBindings: Codable, Equatable {
     }
     return result
   }
+
+  private static func migrateMoveWindow(_ legacyKeyCode: UInt16?) -> UInt16 {
+    guard let legacyKeyCode, legacyKeyCode != 46 else { return 7 }
+    return legacyKeyCode
+  }
 }
 
 // MARK: - Navigation Command
@@ -173,6 +190,7 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
   case cycleSortOrder
   case createSpace
   case closeWindow
+  case minimizeWindow
   case quitApp
   case moveWindow
   case ejectSpaces
@@ -193,6 +211,7 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     case .cycleSortOrder: "Cycle sort order"
     case .createSpace: "Create space menu"
     case .closeWindow: "Close window"
+    case .minimizeWindow: "Minimize window"
     case .quitApp: "Quit app"
     case .moveWindow: "Move window"
     case .ejectSpaces: "Eject Spaces"
@@ -213,6 +232,7 @@ public enum ShortcutAction: String, CaseIterable, Identifiable {
     case .cycleSortOrder: "Cycles through space sort orders"
     case .createSpace: "Opens the create space menu"
     case .closeWindow: "Closes the selected window (Shift closes the space)"
+    case .minimizeWindow: "Minimizes the selected window and keeps the panel open"
     case .quitApp: "Quits the app owning the selected window"
     case .moveWindow: "Marks the selected window for moving to another space"
     case .ejectSpaces:

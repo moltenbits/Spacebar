@@ -173,7 +173,7 @@ struct EmptySpaceMRUTests {
 struct SpaceMoveMRUTests {
 
   /// Marks space 3 (display-2's current space) and visually retargets it to
-  /// display-1, mirroring the Cmd+Shift+M flow.
+  /// display-1, mirroring the Cmd+Shift+X flow.
   private func markAndRetarget(_ vm: SwitcherViewModel) {
     vm.selectedItem = .spaceHeader(3)
     vm.toggleSpaceMoveMode()

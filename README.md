@@ -85,14 +85,14 @@ way while building Spaceballs:
 - **Per-window switching** — lists individual windows, not just apps
 - **Space-aware** — groups windows by Space with MRU (most-recently-used) ordering
 - **Cross-space activation** — switches to any window on any Space with native animation
-- **Move windows between Spaces** — Cmd+M to mark a window, navigate to the target space, release to move (no SIP required)
-- **Move Spaces between displays** — Cmd+Shift+M to mark a Space, arrow to the target display, release to move
+- **Move windows between Spaces** — Cmd+X to mark a window, navigate to the target space, release to move (no SIP required)
+- **Move Spaces between displays** — Cmd+Shift+X to mark a Space, arrow to the target display, release to move
 - **Stable Default Spaces** — each external display's fresh space is auto-named "Default Space" and pinned to its display, so a display always keeps an anchor space and any named Space can be moved off it without first creating a sibling (rename a Default Space to unpin it; the built-in display is exempt)
 - **Eject before disconnect** — press Cmd+E (or run `spaceballs eject`) *before* unplugging external displays to sweep their Spaces onto the built-in display, so disconnecting doesn't scatter windows into random Spaces; on reconnect, ejected Spaces are automatically restored to the displays they came from. Ejecting must be triggered manually — once a display is unplugged, it's too late
 - **Window resizing** — Cmd+Shift+D opens a grid overlay for the focused window: drag cells to resize, or apply
   configurable presets (pressing a preset again cycles it across screens)
 - **Keyboard-driven** — Cmd+Tab to cycle, Cmd+\` to go back; all shortcuts customizable in Settings
-- **Window management** — Cmd+W to close a window, Cmd+Q to quit an app
+- **Window management** — Cmd+M to minimize a window while keeping the panel open, Cmd+W to close a window, Cmd+Q to quit an app
 - **Create and close spaces** - create new spaces (Cmd+N) or close existing ones (Cmd+Shift+W)
 - **Custom space names** — select a Space and press Cmd+R to rename inline (names are local to Spaceballs; macOS does not expose Space names to apps)
 - **Multi-display** — show the panel on the active display, primary display, or per display
@@ -136,8 +136,9 @@ Once running, the app lives in the background (no Dock icon). Keyboard shortcuts
 | Cmd+Shift+↓ / Cmd+Shift+↑ | Jump straight to the display below / above, wrapping around at the edge |
 | Release Cmd (or Cmd+Enter) | Activate selected window or space |
 | Escape | Dismiss panel / cancel current mode |
-| Cmd+M | Enter move mode (mark selected window for moving between Spaces) |
-| Cmd+Shift+M | Enter space-move mode (mark selected Space for moving between displays) |
+| Cmd+M | Minimize selected window and keep the panel open |
+| Cmd+X | Enter move mode (mark selected window for moving between Spaces) |
+| Cmd+Shift+X | Enter space-move mode (mark selected Space for moving between displays) |
 | Cmd+W | Close selected window |
 | Cmd+Shift+W | Close selected space |
 | Cmd+Q | Quit selected app |
@@ -159,7 +160,7 @@ Spaceballs can move windows between Spaces — something macOS does not expose v
 **How to use:**
 
 1. **Cmd+Tab** to open Spaceballs and select the window you want to move
-2. **Cmd+M** to enter move mode — the selection highlight turns to a lighter blue
+2. **Cmd+X** to enter move mode — the selection highlight turns to a lighter blue
 3. **Cmd+Tab** or **Cmd+Arrow** to visually move the window row space-by-space (**Cmd+Shift+Arrow** jumps to the display in that physical direction) — it will appear as the first item in each space as you navigate
 4. **Release Cmd** to execute the move — Spaceballs activates the window, opens Mission Control, drags the window to the target space, switches to that space, and brings the window to front
 5. **Escape** to cancel move mode at any time
@@ -185,7 +186,7 @@ pinned to their display and refuse to move, in both the GUI and the CLI — rena
 **How to use:**
 
 1. **Cmd+Tab** to open Spaceballs and select the Space (or any window in it)
-2. **Cmd+Shift+M** to enter space-move mode
+2. **Cmd+Shift+X** to enter space-move mode
 3. **Arrow keys** to cycle the marked Space between displays, or **Shift+Arrow** to send it to the display in that physical direction
 4. **Release Cmd** to execute the move, or **Escape** to cancel
 

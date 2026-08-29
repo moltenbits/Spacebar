@@ -1709,6 +1709,63 @@ public class SpaceManager {
     }
   }
 
+  // MARK: - Minimize Window
+
+  /// Minimizes a window through Accessibility without activating it.
+  /// Repeated requests are idempotent: an already-minimized window stays minimized.
+  public func minimizeWindow(id windowID: Int) throws {
+    let windows = getAllWindows()
+    guard let window = windows.first(where: { $0.id == windowID }) else {
+      throw WindowActivationError.windowNotFound(windowID: windowID)
+    }
+
+    if window.pid == selfPID {
+      guard let appWindow = NSApp.windows.first(where: { $0.windowNumber == windowID }) else {
+        throw WindowActivationError.windowNotFound(windowID: windowID)
+      }
+      if !appWindow.isMiniaturized {
+        appWindow.miniaturize(nil)
+      }
+      return
+    }
+
+    guard AXIsProcessTrusted() else {
+      throw WindowActivationError.accessibilityNotTrusted
+    }
+
+    performAXMinimize(windowID: windowID, pid: pid_t(window.pid))
+  }
+
+  private func performAXMinimize(windowID: Int, pid: pid_t) {
+    let targetCGWindowID = CGWindowID(windowID)
+
+    DispatchQueue.global(qos: .userInteractive).async { [self] in
+      guard
+        let axWindow = findAXWindowStandard(pid: pid, targetCGWindowID: targetCGWindowID)
+          ?? findAXWindowBruteForce(pid: pid, targetCGWindowID: targetCGWindowID)
+      else {
+        Diagnostics.log("minimize-window", "windowID=\(windowID) AX element not found")
+        return
+      }
+
+      var minimizedRef: CFTypeRef?
+      if AXUIElementCopyAttributeValue(
+        axWindow, kAXMinimizedAttribute as CFString, &minimizedRef) == .success,
+        minimizedRef as? Bool == true
+      {
+        return
+      }
+
+      let result = AXUIElementSetAttributeValue(
+        axWindow, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
+      if result != .success {
+        Diagnostics.log(
+          "minimize-window",
+          "windowID=\(windowID) kAXMinimizedAttribute write failed (\(result.rawValue))")
+      }
+    }
+  }
+
   // MARK: - Close Window
 
   /// Closes a window by pressing its AX close button (same approach as AltTab).

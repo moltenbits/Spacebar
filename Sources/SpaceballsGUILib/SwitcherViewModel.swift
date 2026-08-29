@@ -299,6 +299,7 @@ public final class SwitcherViewModel: ObservableObject {
   private var pendingCloseWindowIDs = Set<Int>()
 
   private let displayContextProvider: any SwitcherDisplayContextProviding
+  private let minimizeWindow: (Int) throws -> Void
 
   public convenience init(
     spaceManager: SpaceManager = SpaceManager(),
@@ -314,10 +315,12 @@ public final class SwitcherViewModel: ObservableObject {
   init(
     spaceManager: SpaceManager = SpaceManager(),
     spaceNameStore: SpaceNameStoring = SpaceNameStore(),
+    minimizeWindow: ((Int) throws -> Void)? = nil,
     displayContextProvider: any SwitcherDisplayContextProviding
   ) {
     self.spaceManager = spaceManager
     self.spaceNameStore = spaceNameStore
+    self.minimizeWindow = minimizeWindow ?? { try spaceManager.minimizeWindow(id: $0) }
     self.displayContextProvider = displayContextProvider
   }
 
@@ -1832,7 +1835,21 @@ public final class SwitcherViewModel: ObservableObject {
     spaceMoveDisplays = []
   }
 
-  // MARK: - Close / Quit
+  // MARK: - Close / Quit / Minimize
+
+  /// Minimizes the currently selected window without removing its row or
+  /// changing the selection, so the panel remains ready for another action.
+  public func minimizeSelectedWindow() {
+    guard case .windowRow(let windowID) = selectedItem,
+      flatFilteredRows.contains(where: { $0.id == windowID })
+    else { return }
+
+    do {
+      try minimizeWindow(windowID)
+    } catch {
+      Diagnostics.log("window", "minimize \(windowID) failed: \(error)")
+    }
+  }
 
   /// Closes the currently selected window and refreshes the list.
   public func closeSelectedWindow() {

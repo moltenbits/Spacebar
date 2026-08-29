@@ -13,6 +13,7 @@ struct StubSwitcherDisplayContextProvider: SwitcherDisplayContextProviding {
 func makeTestSwitcherViewModel(
   spaceManager: SpaceManager = SpaceManager(),
   spaceNameStore: SpaceNameStoring = SpaceNameStore(),
+  minimizeWindow: @escaping (Int) throws -> Void = { _ in },
   displayContext: SwitcherDisplayContext = SwitcherDisplayContext(
     focusedDisplayUUID: "unmatched-test-display",
     displayNamesByUUID: [:]
@@ -21,6 +22,7 @@ func makeTestSwitcherViewModel(
   SwitcherViewModel(
     spaceManager: spaceManager,
     spaceNameStore: spaceNameStore,
+    minimizeWindow: minimizeWindow,
     displayContextProvider: StubSwitcherDisplayContextProvider(context: displayContext)
   )
 }

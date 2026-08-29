@@ -792,6 +792,40 @@ struct SelectionNavigationTests {
     #expect(vm.selectedItem == .spaceHeader(1))
   }
 
+  @Test("Minimizing a window preserves the panel rows and selection")
+  func minimizePreservesPanelState() {
+    let ds = makeTwoSpaceDataSource()
+    var minimizedWindowIDs: [Int] = []
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: ds),
+      minimizeWindow: { minimizedWindowIDs.append($0) })
+    vm.refresh()
+    vm.selectedItem = .windowRow(11)
+    let rowsBefore = vm.flatFilteredRows.map(\.id)
+
+    vm.minimizeSelectedWindow()
+
+    #expect(minimizedWindowIDs == [11])
+    #expect(vm.flatFilteredRows.map(\.id) == rowsBefore)
+    #expect(vm.selectedItem == .windowRow(11))
+  }
+
+  @Test("Minimize on a non-window row is a no-op")
+  func minimizeOnHeaderIsNoOp() {
+    let ds = makeTwoSpaceDataSource()
+    var minimizedWindowIDs: [Int] = []
+    let vm = makeTestSwitcherViewModel(
+      spaceManager: SpaceManager(dataSource: ds),
+      minimizeWindow: { minimizedWindowIDs.append($0) })
+    vm.refresh()
+    vm.selectedItem = .spaceHeader(1)
+
+    vm.minimizeSelectedWindow()
+
+    #expect(minimizedWindowIDs.isEmpty)
+    #expect(vm.selectedItem == .spaceHeader(1))
+  }
+
   @Test("Full tab cycle visits all rows and settings")
   func fullTabCycle() {
     let ds = makeTwoSpaceDataSource()
