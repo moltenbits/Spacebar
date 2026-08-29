@@ -21,6 +21,25 @@ public enum LaunchType: String, Codable, CaseIterable, Identifiable {
 // MARK: - App Launcher
 
 public struct AppLauncher: Codable, Equatable, Identifiable {
+  static let legacyITermCommand = """
+    tell application "iTerm"
+      set newWindow to (create window with default profile)
+      tell current session of newWindow
+        write text "cd $PATH"
+      end tell
+    end tell
+    """
+
+  static let iTermCommand = """
+    do shell script "/usr/bin/open -g -b com.googlecode.iterm2"
+    tell application "iTerm"
+      set newWindow to (create window with default profile)
+      tell current session of newWindow
+        write text "cd $PATH"
+      end tell
+    end tell
+    """
+
   public var id: UUID
   public var label: String
   public var type: LaunchType
@@ -54,11 +73,13 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
     id = try c.decode(UUID.self, forKey: .id)
     label = try c.decode(String.self, forKey: .label)
     type = try c.decode(LaunchType.self, forKey: .type)
-    command = try c.decode(String.self, forKey: .command)
+    let decodedCommand = try c.decode(String.self, forKey: .command)
     appName = try c.decodeIfPresent(String.self, forKey: .appName) ?? ""
     bundleID =
       try c.decodeIfPresent(String.self, forKey: .bundleID)
       ?? Self.knownBundleID(forAppName: appName)
+    command = Self.migratedCommand(
+      decodedCommand, type: type, bundleID: bundleID)
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -73,6 +94,18 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
     case "safari": "com.apple.Safari"
     default: ""
     }
+  }
+
+  private static func migratedCommand(
+    _ command: String, type: LaunchType, bundleID: String
+  ) -> String {
+    guard type == .applescript,
+      bundleID == "com.googlecode.iterm2",
+      command == legacyITermCommand
+    else {
+      return command
+    }
+    return iTermCommand
   }
 
   /// Returns the command with workspace variables substituted.
@@ -157,14 +190,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         type: .applescript,
         appName: "iTerm",
         bundleID: "com.googlecode.iterm2",
-        command: """
-          tell application "iTerm"
-            set newWindow to (create window with default profile)
-            tell current session of newWindow
-              write text "cd $PATH"
-            end tell
-          end tell
-          """
+        command: AppLauncher.iTermCommand
       )
     case .intellij:
       return AppLauncher(

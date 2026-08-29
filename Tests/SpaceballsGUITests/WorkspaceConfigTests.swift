@@ -35,6 +35,42 @@ struct WorkspaceConfigTests {
     #expect(LauncherTemplate.genericShell.launcher.bundleID.isEmpty)
   }
 
+  @Test("Legacy stock iTerm launchers are migrated to an explicit cold launch")
+  func legacyITermLauncherColdLaunchMigration() throws {
+    let legacy = AppLauncher(
+      type: .applescript,
+      appName: "iTerm",
+      bundleID: "com.googlecode.iterm2",
+      command: """
+        tell application "iTerm"
+          set newWindow to (create window with default profile)
+          tell current session of newWindow
+            write text "cd $PATH"
+          end tell
+        end tell
+        """)
+
+    let migrated = try JSONDecoder().decode(
+      AppLauncher.self, from: JSONEncoder().encode(legacy))
+
+    #expect(migrated.command.contains("open -g -b com.googlecode.iterm2"))
+    #expect(migrated.command.contains("create window with default profile"))
+  }
+
+  @Test("Custom iTerm AppleScripts are not replaced by the stock migration")
+  func customITermLauncherIsNotMigrated() throws {
+    let custom = AppLauncher(
+      type: .applescript,
+      appName: "iTerm",
+      bundleID: "com.googlecode.iterm2",
+      command: "tell application \"iTerm\" to create tab with default profile")
+
+    let decoded = try JSONDecoder().decode(
+      AppLauncher.self, from: JSONEncoder().encode(custom))
+
+    #expect(decoded.command == custom.command)
+  }
+
   @Test("Explicit bundle IDs survive encoding and decoding")
   func bundleIDRoundTrip() throws {
     let original = AppLauncher(

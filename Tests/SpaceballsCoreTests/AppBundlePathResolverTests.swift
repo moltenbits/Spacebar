@@ -51,4 +51,35 @@ struct AppBundlePathResolverTests {
       AppBundlePathResolver.containingAppBundlePath(forExecutablePath: symlink.path)
         == root.appendingPathComponent("Spaceballs-CLI.app").path)
   }
+
+  @Test("resolves a process bundle before AppKit registers the application")
+  func resolvesProcessBundleBeforeAppKitRegistration() throws {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("spaceballs-process-resolver-\(UUID().uuidString)")
+    let app = root.appendingPathComponent("ColdLaunch.app")
+    let executable = app.appendingPathComponent("Contents/MacOS/cold-launch")
+    let infoPlist = app.appendingPathComponent("Contents/Info.plist")
+
+    try FileManager.default.createDirectory(
+      at: executable.deletingLastPathComponent(),
+      withIntermediateDirectories: true)
+    let plistData = try PropertyListSerialization.data(
+      fromPropertyList: [
+        "CFBundleIdentifier": "com.example.cold-launch",
+        "CFBundleExecutable": "cold-launch",
+        "CFBundlePackageType": "APPL",
+      ],
+      format: .xml,
+      options: 0)
+    try plistData.write(to: infoPlist)
+    _ = FileManager.default.createFile(atPath: executable.path, contents: Data())
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let bundleID = ProcessBundleIdentifierResolver.resolve(
+      pid: 123,
+      registeredBundleIdentifier: { _ in nil },
+      executablePath: { _ in executable.path })
+
+    #expect(bundleID == "com.example.cold-launch")
+  }
 }
