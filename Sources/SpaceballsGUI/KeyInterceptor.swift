@@ -12,6 +12,8 @@ protocol KeyInterceptorDelegate: AnyObject {
   func keyInterceptorOpenSettings()
   func keyInterceptorCloseWindow()
   func keyInterceptorQuitApp()
+  func keyInterceptorMinimizeWindow()
+  func keyInterceptorMinimizeSpace()
   func keyInterceptorMoveDisplay(_ direction: ArrangementDirection)
   func keyInterceptorJumpToNextSpace()
   func keyInterceptorJumpToPreviousSpace()
@@ -304,10 +306,11 @@ private func keyInterceptorCallback(
         }
         return nil  // consume
       }
-      // Close / Quit / next-space / prev-space — no-op during rename.
+      // Close / Quit / Minimize / next-space / prev-space — no-op during rename.
       // Superset match on Cmd: this suppresses, never triggers.
       if mods.contains(.maskCommand)
         && (keyCode == Int64(bindings.closeWindow) || keyCode == Int64(bindings.quitApp)
+          || keyCode == Int64(bindings.minimizeWindow)
           || keyCode == Int64(bindings.nextSpace)
           || keyCode == Int64(bindings.previousSpace))
       {
@@ -442,6 +445,20 @@ private func keyInterceptorCallback(
       return nil  // consume
     }
 
+    // Minimize the selected window (Cmd) or every window in its Space (Cmd+Shift).
+    if (cmdExact || cmdShiftExact) && interceptor.panelVisible,
+      let command = bindings.minimizeCommand(
+        keyCode: UInt16(keyCode), shiftHeld: cmdShiftExact)
+    {
+      DispatchQueue.main.async {
+        switch command {
+        case .window: interceptor.delegate?.keyInterceptorMinimizeWindow()
+        case .space: interceptor.delegate?.keyInterceptorMinimizeSpace()
+        }
+      }
+      return nil  // consume
+    }
+
     // Cycle sort order
     if cmdExact && keyCode == Int64(bindings.cycleSortOrder) && interceptor.panelVisible {
       DispatchQueue.main.async {
@@ -450,7 +467,7 @@ private func keyInterceptorCallback(
       return nil  // consume
     }
 
-    // Move window to another space (Cmd+M) or space to another display (Cmd+Shift+M)
+    // Move window to another space (Cmd+X) or space to another display (Cmd+Shift+X)
     if (cmdExact || cmdShiftExact) && keyCode == Int64(bindings.moveWindow)
       && interceptor.panelVisible
     {

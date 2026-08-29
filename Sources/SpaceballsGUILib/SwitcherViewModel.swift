@@ -39,10 +39,11 @@ public struct SwitcherRow: Identifiable {
   public let appIcon: NSImage?
   public let pid: Int
   public let isSticky: Bool
+  public var isMinimized: Bool
 
   public init(
     id: Int, appName: String, windowTitle: String,
-    appIcon: NSImage?, pid: Int, isSticky: Bool
+    appIcon: NSImage?, pid: Int, isSticky: Bool, isMinimized: Bool = false
   ) {
     self.id = id
     self.appName = appName
@@ -50,6 +51,7 @@ public struct SwitcherRow: Identifiable {
     self.appIcon = appIcon
     self.pid = pid
     self.isSticky = isSticky
+    self.isMinimized = isMinimized
   }
 }
 
@@ -299,6 +301,7 @@ public final class SwitcherViewModel: ObservableObject {
   private var pendingCloseWindowIDs = Set<Int>()
 
   private let displayContextProvider: any SwitcherDisplayContextProviding
+  private let minimizeWindow: (Int) throws -> Void
 
   public convenience init(
     spaceManager: SpaceManager = SpaceManager(),
@@ -314,10 +317,12 @@ public final class SwitcherViewModel: ObservableObject {
   init(
     spaceManager: SpaceManager = SpaceManager(),
     spaceNameStore: SpaceNameStoring = SpaceNameStore(),
+    minimizeWindow: ((Int) throws -> Void)? = nil,
     displayContextProvider: any SwitcherDisplayContextProviding
   ) {
     self.spaceManager = spaceManager
     self.spaceNameStore = spaceNameStore
+    self.minimizeWindow = minimizeWindow ?? { try spaceManager.minimizeWindow(id: $0) }
     self.displayContextProvider = displayContextProvider
   }
 
@@ -668,8 +673,8 @@ public final class SwitcherViewModel: ObservableObject {
   }
 
   public var selectedSpaceID: UInt64? {
-    if case .spaceHeader(let id) = selectedItem { return id }
-    return nil
+    let map = windowSpaceMap()
+    return spaceID(for: selectedItem ?? .settings, using: map)
   }
 
   // MARK: - Selection
@@ -1197,14 +1202,6 @@ public final class SwitcherViewModel: ObservableObject {
 
     sortOverlayText = "Sorting: \(spaceSortOrder.label)"
     sortOverlayGeneration += 1
-  }
-
-  // MARK: - Close Space
-
-  /// Returns the space ID for the currently selected item (header or window row).
-  public var selectedSpaceForClose: UInt64? {
-    let map = windowSpaceMap()
-    return spaceID(for: selectedItem ?? .settings, using: map)
   }
 
   // MARK: - Multi-Panel Display Navigation
@@ -1832,7 +1829,63 @@ public final class SwitcherViewModel: ObservableObject {
     spaceMoveDisplays = []
   }
 
-  // MARK: - Close / Quit
+  // MARK: - Close / Quit / Minimize
+
+  /// Minimizes the currently selected window and advances to the next window,
+  /// so the panel remains ready for another action.
+  public func minimizeSelectedWindow() {
+    guard case .windowRow(let windowID) = selectedItem else { return }
+    let rowsBeforeMinimize = flatFilteredRows
+    guard let selectedIndex = rowsBeforeMinimize.firstIndex(where: { $0.id == windowID }) else {
+      return
+    }
+    let nextWindowID =
+      rowsBeforeMinimize.count > 1
+      ? rowsBeforeMinimize[(selectedIndex + 1) % rowsBeforeMinimize.count].id
+      : nil
+
+    do {
+      try minimizeWindow(windowID)
+      markWindowMinimized(windowID)
+      if let nextWindowID {
+        selectedItem = .windowRow(nextWindowID)
+      }
+    } catch {
+      Diagnostics.log("window", "minimize \(windowID) failed: \(error)")
+    }
+  }
+
+  /// Minimizes every non-minimized window in the selected Space, then leaves
+  /// selection on that Space's header at the top of the group.
+  public func minimizeSelectedSpace() {
+    guard let spaceID = selectedSpaceID,
+      let windows = sections.first(where: { $0.id == spaceID })?.windows
+    else { return }
+
+    for row in windows where !row.isMinimized {
+      do {
+        try minimizeWindow(row.id)
+        markWindowMinimized(row.id)
+      } catch {
+        Diagnostics.log("window", "minimize \(row.id) failed: \(error)")
+      }
+    }
+    selectedItem = .spaceHeader(spaceID)
+  }
+
+  private func markWindowMinimized(_ windowID: Int) {
+    var updated = sections
+    for sectionIndex in updated.indices {
+      guard
+        let rowIndex = updated[sectionIndex].windows.firstIndex(where: { $0.id == windowID })
+      else { continue }
+
+      var row = updated[sectionIndex].windows.remove(at: rowIndex)
+      row.isMinimized = true
+      updated[sectionIndex].windows.append(row)
+    }
+    sections = updated
+  }
 
   /// Closes the currently selected window and refreshes the list.
   public func closeSelectedWindow() {
@@ -1960,17 +2013,22 @@ public final class SwitcherViewModel: ObservableObject {
   // MARK: - Helpers
 
   private func reorderByMRU(_ windows: [WindowInfo]) -> [WindowInfo] {
-    guard !windowMRUHistory.isEmpty else { return windows }
-    var mruRank: [Int: Int] = [:]
-    for (index, wid) in windowMRUHistory.enumerated() {
-      mruRank[wid] = index
+    let ordered: [WindowInfo]
+    if windowMRUHistory.isEmpty {
+      ordered = windows
+    } else {
+      var mruRank: [Int: Int] = [:]
+      for (index, wid) in windowMRUHistory.enumerated() {
+        mruRank[wid] = index
+      }
+      let maxRank = windowMRUHistory.count
+      ordered = windows.enumerated().sorted { a, b in
+        let aRank = mruRank[a.element.id] ?? (maxRank + a.offset)
+        let bRank = mruRank[b.element.id] ?? (maxRank + b.offset)
+        return aRank < bRank
+      }.map(\.element)
     }
-    let maxRank = windowMRUHistory.count
-    return windows.enumerated().sorted { a, b in
-      let aRank = mruRank[a.element.id] ?? (maxRank + a.offset)
-      let bRank = mruRank[b.element.id] ?? (maxRank + b.offset)
-      return aRank < bRank
-    }.map(\.element)
+    return ordered.filter { !$0.isMinimized } + ordered.filter(\.isMinimized)
   }
 
   private func makeRow(from window: WindowInfo) -> SwitcherRow {
@@ -1992,7 +2050,8 @@ public final class SwitcherViewModel: ObservableObject {
       windowTitle: window.name ?? "",
       appIcon: icon,
       pid: window.pid,
-      isSticky: window.isSticky
+      isSticky: window.isSticky,
+      isMinimized: window.isMinimized
     )
   }
 }

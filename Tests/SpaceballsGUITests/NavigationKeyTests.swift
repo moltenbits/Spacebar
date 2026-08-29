@@ -49,4 +49,21 @@ struct NavigationKeyTests {
     // 125 is no longer bound to any navigation action.
     #expect(custom.navigationCommand(keyCode: 125, shiftHeld: false) == nil)
   }
+
+  @Test("Minimize key resolves window and Space actions from Shift")
+  func minimizeKeyResolvesScope() {
+    #expect(bindings.minimizeCommand(keyCode: 46, shiftHeld: false) == .window)
+    #expect(bindings.minimizeCommand(keyCode: 46, shiftHeld: true) == .space)
+    #expect(bindings.minimizeCommand(keyCode: 7, shiftHeld: false) == nil)
+  }
+
+  @Test("Custom minimize key resolves both scopes")
+  func customMinimizeKeyResolvesScope() {
+    var custom = KeyBindings()
+    custom.minimizeWindow = 5
+
+    #expect(custom.minimizeCommand(keyCode: 5, shiftHeld: false) == .window)
+    #expect(custom.minimizeCommand(keyCode: 5, shiftHeld: true) == .space)
+    #expect(custom.minimizeCommand(keyCode: 46, shiftHeld: false) == nil)
+  }
 }

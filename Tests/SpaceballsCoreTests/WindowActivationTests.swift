@@ -18,6 +18,15 @@ struct WindowActivationTests {
     }
   }
 
+  @Test("Minimize throws windowNotFound when window ID does not exist")
+  func minimizeWindowNotFound() {
+    let manager = SpaceManager(dataSource: MockDataSource())
+
+    #expect(throws: WindowActivationError.windowNotFound(windowID: 99999)) {
+      try manager.minimizeWindow(id: 99999)
+    }
+  }
+
   @Test(
     "Throws accessibilityNotTrusted when AX permission is missing",
     .enabled(if: !AXIsProcessTrusted(), "Requires AX trust to be absent (e.g. CI)")

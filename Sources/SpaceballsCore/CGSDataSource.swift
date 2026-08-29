@@ -47,27 +47,47 @@ public struct CGSDataSource: SystemDataSource {
   }
 
   public func liveAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? {
-    // Without AX trust the query returns nothing meaningful; report "unknown"
-    // so callers keep windows rather than hiding real ones.
-    guard AXIsProcessTrusted() else { return nil }
-
-    let appElement = AXUIElementCreateApplication(pid)
-    var value: CFTypeRef?
-    let err = AXUIElementCopyAttributeValue(
-      appElement, kAXWindowsAttribute as CFString, &value)
-    guard err == .success, let axWindows = value as? [AXUIElement] else {
-      return nil
-    }
+    guard let axWindows = axWindows(pid: pid) else { return nil }
 
     // kAXWindowsAttribute covers the app's windows on the current Space (including
     // minimized ones) but not closed windows — exactly the liveness signal we need.
+    return Set(
+      axWindows.compactMap { axWindow in
+        var windowID = CGWindowID(0)
+        return _AXUIElementGetWindow(axWindow, &windowID) == .success ? windowID : nil
+      })
+  }
+
+  public func minimizedAXWindowIDs(pid: pid_t) -> Set<CGWindowID>? {
+    guard let axWindows = axWindows(pid: pid) else { return nil }
+
     var ids = Set<CGWindowID>()
     for axWindow in axWindows {
+      var minimizedRef: CFTypeRef?
+      guard
+        AXUIElementCopyAttributeValue(
+          axWindow, kAXMinimizedAttribute as CFString, &minimizedRef) == .success,
+        minimizedRef as? Bool == true
+      else { continue }
+
       var windowID = CGWindowID(0)
       if _AXUIElementGetWindow(axWindow, &windowID) == .success {
         ids.insert(windowID)
       }
     }
     return ids
+  }
+
+  private func axWindows(pid: pid_t) -> [AXUIElement]? {
+    // Without AX trust the query returns nothing meaningful; report "unknown"
+    // so callers do not infer liveness or minimization from a failed query.
+    guard AXIsProcessTrusted() else { return nil }
+
+    let appElement = AXUIElementCreateApplication(pid)
+    var value: CFTypeRef?
+    let error = AXUIElementCopyAttributeValue(
+      appElement, kAXWindowsAttribute as CFString, &value)
+    guard error == .success else { return nil }
+    return value as? [AXUIElement]
   }
 }

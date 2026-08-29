@@ -34,16 +34,19 @@ struct SwitcherRowView: View {
 
       // App icon
       if showAppIcon {
-        if let icon = row.appIcon {
-          Image(nsImage: icon)
-            .resizable()
-            .frame(width: iconSize, height: iconSize)
-        } else {
-          Image(systemName: "app.fill")
-            .resizable()
-            .frame(width: iconSize, height: iconSize)
-            .foregroundStyle(.secondary)
+        Group {
+          if let icon = row.appIcon {
+            Image(nsImage: icon)
+              .resizable()
+          } else {
+            Image(systemName: "app.fill")
+              .resizable()
+              .foregroundStyle(.secondary)
+          }
         }
+        .frame(width: iconSize, height: iconSize)
+        .grayscale(row.isMinimized ? 0.55 : 0)
+        .opacity(row.isMinimized ? 0.65 : 1)
       }
 
       // Window title

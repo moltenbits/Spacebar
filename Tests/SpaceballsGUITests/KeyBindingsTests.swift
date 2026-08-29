@@ -19,6 +19,8 @@ struct KeyBindingsTests {
     #expect(bindings.renameSpace == 15)
     #expect(bindings.closeWindow == 13)
     #expect(bindings.quitApp == 12)
+    #expect(bindings.minimizeWindow == 46)
+    #expect(bindings.moveWindow == 7)
     #expect(bindings.cancel == 53)
   }
 
@@ -60,6 +62,8 @@ struct KeyBindingsTests {
     #expect(bindings[.renameSpace] == 15)
     #expect(bindings[.closeWindow] == 13)
     #expect(bindings[.quitApp] == 12)
+    #expect(bindings[.minimizeWindow] == 46)
+    #expect(bindings[.moveWindow] == 7)
     #expect(bindings[.cancel] == 53)
   }
 
@@ -97,6 +101,25 @@ struct KeyBindingsTests {
     bindings.nextSpace = 48  // also conflicts with activateAndNext
     let conflicts = bindings.conflicts()
     #expect(conflicts.count == 2)
+  }
+
+  @Test("Legacy default Cmd-M move binding migrates to Cmd-X")
+  func legacyMoveDefaultMigrates() throws {
+    let data = Data(#"{"moveWindow":46}"#.utf8)
+    let bindings = try JSONDecoder().decode(KeyBindings.self, from: data)
+
+    #expect(bindings.minimizeWindow == 46)
+    #expect(bindings.moveWindow == 7)
+    #expect(bindings.conflicts().isEmpty)
+  }
+
+  @Test("Legacy custom move binding is preserved when minimize is added")
+  func legacyCustomMoveBindingIsPreserved() throws {
+    let data = Data(#"{"moveWindow":5}"#.utf8)
+    let bindings = try JSONDecoder().decode(KeyBindings.self, from: data)
+
+    #expect(bindings.minimizeWindow == 46)
+    #expect(bindings.moveWindow == 5)
   }
 
   @Test("Equatable: identical bindings are equal")
@@ -188,6 +211,19 @@ struct AppSettingsKeyBindingsTests {
     #expect(settings2.keyBindings.renameSpace == 0)
     #expect(settings2.keyBindings.previousItem == 50)  // default
 
+    defaults.removePersistentDomain(forName: suiteName)
+  }
+
+  @Test("Persisted legacy Cmd-M move binding migrates when settings load")
+  func persistedLegacyMoveDefaultMigrates() throws {
+    let suiteName = "com.moltenbits.spaceballs.test.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.set(Data(#"{"moveWindow":46}"#.utf8), forKey: "keyBindings")
+
+    let settings = AppSettings(defaults: defaults)
+
+    #expect(settings.keyBindings.minimizeWindow == 46)
+    #expect(settings.keyBindings.moveWindow == 7)
     defaults.removePersistentDomain(forName: suiteName)
   }
 
