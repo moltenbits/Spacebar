@@ -126,7 +126,10 @@ extension SpaceManager {
   /// Moves previously ejected spaces back to their recorded displays (those
   /// currently connected) in one Mission Control session, clearing records
   /// as they complete. Records whose display is still disconnected are kept;
-  /// records whose space no longer exists are dropped. No space is activated.
+  /// records whose resolved display is connected but whose space no longer
+  /// exists are dropped. Records for disconnected displays remain pending,
+  /// even when their spaces are absent from the current CGS snapshot. No
+  /// space is activated.
   ///
   /// `onlyArmed` restricts the run to records whose display has actually been
   /// observed absent since the eject — the auto-restore gate. Manual restores
