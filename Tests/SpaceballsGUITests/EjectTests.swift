@@ -144,6 +144,32 @@ struct RestorePlannerTests {
     #expect(!plan.moves.contains { $0.spaceUUID == "u9" })
   }
 
+  @Test("A missing Space whose display is disconnected stays pending")
+  func missingSpaceOnDisconnectedDisplayKeepsWaiting() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true)
+    ]
+    let plan = RestorePlanner.plan(spaces: spaces, pending: ["u99": "d1"])
+
+    #expect(plan.waiting == ["u99"])
+    #expect(plan.stale.isEmpty)
+  }
+
+  @Test("Restoring one display preserves missing Spaces for disconnected displays")
+  func mixedDisplayGroupsRemainIndependent() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true),
+      desktop(id: 3, uuid: "u3", display: "b"),
+      desktop(id: 2, uuid: "u2", display: "d1", current: true),
+    ]
+    let pending = ["u3": "d1", "u99": "d2"]
+    let plan = RestorePlanner.plan(spaces: spaces, pending: pending)
+
+    #expect(plan.moves.map(\.spaceUUID) == ["u3"])
+    #expect(plan.waiting == ["u99"])
+    #expect(plan.stale.isEmpty)
+  }
+
   @Test("A record whose space no longer exists is dropped")
   func staleRecordDropped() {
     let (spaces, pending) = makeRestoreScenario()
@@ -380,6 +406,37 @@ struct RestoreFingerprintPlanningTests {
       connectedFingerprints: ["b": fingerprint(vendor: 2)])
     #expect(plan.waiting == ["u3"])
     #expect(plan.displayRemap.isEmpty)
+  }
+
+  @Test("A missing Space waits when its fingerprint has no connected match")
+  func missingSpaceWithUnmatchedFingerprintWaits() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true)
+    ]
+    let plan = RestorePlanner.plan(
+      spaces: spaces, pending: ["u99": "d-old"],
+      recordedFingerprints: ["d-old": fingerprint(vendor: 1)],
+      connectedFingerprints: ["b": fingerprint(vendor: 2)])
+
+    #expect(plan.waiting == ["u99"])
+    #expect(plan.stale.isEmpty)
+    #expect(plan.displayRemap.isEmpty)
+  }
+
+  @Test("A missing Space is stale after its display resolves by fingerprint")
+  func missingSpaceWithMatchedFingerprintIsStale() {
+    let spaces = [
+      desktop(id: 1, uuid: "u1", display: "b", current: true),
+      desktop(id: 2, uuid: "u2", display: "d-new", current: true),
+    ]
+    let plan = RestorePlanner.plan(
+      spaces: spaces, pending: ["u99": "d-old"],
+      recordedFingerprints: ["d-old": fingerprint(vendor: 1)],
+      connectedFingerprints: ["b": fingerprint(vendor: 2), "d-new": fingerprint(vendor: 1)])
+
+    #expect(plan.stale == ["u99"])
+    #expect(plan.waiting.isEmpty)
+    #expect(plan.displayRemap == ["d-old": "d-new"])
   }
 }
 

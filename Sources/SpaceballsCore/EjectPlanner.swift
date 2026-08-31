@@ -111,7 +111,8 @@ public enum RestorePlanner {
     public let moves: [EjectPlanner.Move]
     /// Records whose space is already on its (resolved) home display — clear them.
     public let completed: [String]
-    /// Records whose space no longer exists — clear them.
+    /// Records whose resolved home display is connected but whose space no
+    /// longer exists — clear them.
     public let stale: [String]
     /// Records whose display is still disconnected — keep them.
     public let waiting: [String]
@@ -152,12 +153,12 @@ public enum RestorePlanner {
     var stale: [String] = []
     var waiting: [String] = []
     for (spaceUUID, displayUUID) in pending {
-      guard let space = spaceByUUID[spaceUUID] else {
-        stale.append(spaceUUID)
-        continue
-      }
       guard let resolved = resolveDisplay(displayUUID) else {
         waiting.append(spaceUUID)
+        continue
+      }
+      guard let space = spaceByUUID[spaceUUID] else {
+        stale.append(spaceUUID)
         continue
       }
       if space.displayUUID == resolved {
