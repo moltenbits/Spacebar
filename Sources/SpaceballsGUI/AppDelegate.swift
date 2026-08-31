@@ -69,7 +69,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     panels = [makePanel()]
     resizeViewModel = ResizeViewModel()
 
-    windowLayoutStore = WindowLayoutStore(spaceManager: viewModel.spaceManager)
+    windowLayoutStore = WindowLayoutStore(
+      spaceManager: viewModel.spaceManager,
+      spaceNameStore: spaceNameStore)
     windowLayoutCoordinator = WindowLayoutCoordinator(
       store: windowLayoutStore,
       spaceManager: viewModel.spaceManager,

@@ -25,7 +25,7 @@ final class WindowLayoutCoordinator {
 
   func start() {
     seedLastSeenDisplays()
-    associateConfiguredWorkspaces()
+    prepareConfiguredWorkspaces()
 
     let workspaceCenter = NSWorkspace.shared.notificationCenter
     observers.append(
@@ -80,7 +80,7 @@ final class WindowLayoutCoordinator {
     for space in activeSpaces {
       let last = store.lastSeenDisplayUUID(forSpace: space.uuid)
       if last != space.displayUUID {
-        store.restore(spaceUUID: space.uuid, displayUUID: space.displayUUID)
+        _ = store.restore(spaceUUID: space.uuid, displayUUID: space.displayUUID)
         store.setLastSeenDisplay(spaceUUID: space.uuid, displayUUID: space.displayUUID)
       }
     }
@@ -111,9 +111,9 @@ final class WindowLayoutCoordinator {
     }
   }
 
-  /// Associates named Spaces at launch so layouts captured before stable
-  /// workspace IDs existed are migrated before the next workspace setup.
-  private func associateConfiguredWorkspaces() {
+  /// Resolves configured named Spaces at launch so both legacy stores are
+  /// migrated into the shared logical layout before the next workspace setup.
+  private func prepareConfiguredWorkspaces() {
     guard appSettings.rememberWindowLayouts else { return }
     let spaces = spaceManager.getAllSpaces()
     for workspace in appSettings.workspaces {
@@ -122,10 +122,10 @@ final class WindowLayoutCoordinator {
         let space = spaces.first(where: { $0.id == spaceID })
       else { continue }
       let bundleIDs = Set(workspace.launchers.map(\.bundleID).filter { !$0.isEmpty })
-      store.associateWorkspace(
-        id: workspace.id.uuidString,
+      store.prepareSpace(
         spaceUUID: space.uuid,
         displayUUID: space.displayUUID,
+        legacyWorkspaceID: workspace.id.uuidString,
         bundleIDs: bundleIDs)
     }
   }

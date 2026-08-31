@@ -1,26 +1,5 @@
 import Foundation
 
-/// Result of one attempt to apply a saved workspace layout. Bundle IDs remain
-/// pending until at least one eligible window for that app is resized.
-public struct WorkspaceLayoutRestoreAttempt: Equatable {
-  public let hasLayout: Bool
-  public let movedWindows: Int
-  public let restoredBundleIDs: Set<String>
-  public let pendingBundleIDs: Set<String>
-
-  public init(
-    hasLayout: Bool,
-    movedWindows: Int,
-    restoredBundleIDs: Set<String>,
-    pendingBundleIDs: Set<String>
-  ) {
-    self.hasLayout = hasLayout
-    self.movedWindows = movedWindows
-    self.restoredBundleIDs = restoredBundleIDs
-    self.pendingBundleIDs = pendingBundleIDs
-  }
-}
-
 /// Aggregate result of bounded workspace-window discovery and layout restore.
 public struct WorkspaceLayoutRestoreOutcome: Equatable {
   public let hasLayout: Bool
@@ -44,11 +23,11 @@ public struct WorkspaceLayoutRestoreOutcome: Equatable {
   }
 }
 
-/// Coordinates stable workspace association with bounded polling for windows
-/// created asynchronously by workspace launchers.
+/// Uses the shared logical-Space layout store while polling for windows created
+/// asynchronously by workspace launchers.
 public final class WorkspaceWindowLayoutRestorer {
   typealias Prepare = (String, String, String, Set<String>) -> Bool
-  typealias Attempt = (String, String, String, Set<String>?) -> WorkspaceLayoutRestoreAttempt
+  typealias Attempt = (String, String, String, Set<String>?) -> WindowLayoutRestoreAttempt
 
   private let maximumAttempts: Int
   private let retryInterval: TimeInterval
@@ -66,18 +45,17 @@ public final class WorkspaceWindowLayoutRestorer {
       retryInterval: retryInterval,
       prepare: { workspaceID, spaceUUID, displayUUID, bundleIDs in
         Self.onMain {
-          store.associateWorkspace(
-            id: workspaceID,
+          store.prepareSpace(
             spaceUUID: spaceUUID,
             displayUUID: displayUUID,
+            legacyWorkspaceID: workspaceID,
             bundleIDs: bundleIDs)
         }
       },
-      attempt: { workspaceID, spaceUUID, displayUUID, requestedBundleIDs in
+      attempt: { _, spaceUUID, displayUUID, requestedBundleIDs in
         Self.onMain {
-          store.restoreWorkspace(
-            workspaceID: workspaceID,
-            targetSpaceUUID: spaceUUID,
+          store.restore(
+            spaceUUID: spaceUUID,
             displayUUID: displayUUID,
             requestedBundleIDs: requestedBundleIDs)
         }
@@ -99,8 +77,8 @@ public final class WorkspaceWindowLayoutRestorer {
     self.sleep = sleep
   }
 
-  /// Associates the workspace with its current backing Space and promotes any
-  /// existing Space-keyed layout. Returns whether a workspace layout is ready.
+  /// Resolves the workspace's backing Space to the shared logical identity and
+  /// migrates any legacy workspace-keyed data. Returns whether a layout exists.
   @discardableResult
   public func prepare(
     workspaceID: String,

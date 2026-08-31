@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Protocol
 
-public protocol SpaceNameStoring {
+public protocol SpaceNameStoring: AnyObject {
   func customName(forSpaceUUID uuid: String) -> String?
   func setCustomName(_ name: String?, forSpaceUUID uuid: String)
   func allCustomNames() -> [String: String]
@@ -17,6 +17,9 @@ public final class SpaceNameStore: SpaceNameStoring {
   /// DefaultSpaceNamer). A space carrying exactly this name cannot be moved
   /// to another display; renaming it unpins it.
   public static let defaultSpaceName = "Default Space"
+  static let customNameDidChangeNotification = Notification.Name(
+    "SpaceNameStore.customNameDidChange")
+  static let spaceUUIDUserInfoKey = "spaceUUID"
 
   private static let key = "customSpaceNames"
   private let defaults: UserDefaults
@@ -33,12 +36,23 @@ public final class SpaceNameStore: SpaceNameStoring {
 
   public func setCustomName(_ name: String?, forSpaceUUID uuid: String) {
     var names = allCustomNames()
+    let previousName = names[uuid]
     if let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       names[uuid] = name
     } else {
       names.removeValue(forKey: uuid)
     }
     defaults.set(names, forKey: Self.key)
+
+    // Layout identity needs an eager signal only for an actual rename. Initial
+    // naming has no prior named layout, while removal may mean the Space was
+    // closed and must leave its durable named layout available for recreation.
+    if let previousName, let currentName = names[uuid], previousName != currentName {
+      NotificationCenter.default.post(
+        name: Self.customNameDidChangeNotification,
+        object: self,
+        userInfo: [Self.spaceUUIDUserInfoKey: uuid])
+    }
   }
 
   public func allCustomNames() -> [String: String] {
