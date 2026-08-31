@@ -1174,6 +1174,25 @@ struct NewlyCreatedSpaceTests {
   }
 }
 
+@Suite("Space Creation Display Selection")
+struct SpaceCreationDisplaySelectionTests {
+  @Test("Defaults to the primary display")
+  func defaultsToPrimaryDisplay() {
+    #expect(
+      SpaceManager.creationDisplayID(
+        requested: nil,
+        primary: 100) == 100)
+  }
+
+  @Test("An explicit display overrides the primary display")
+  func explicitDisplayOverridesPrimary() {
+    #expect(
+      SpaceManager.creationDisplayID(
+        requested: 200,
+        primary: 100) == 200)
+  }
+}
+
 // MARK: - Window-to-Space Grouping Tests
 
 @Suite("Window-to-Space Grouping")

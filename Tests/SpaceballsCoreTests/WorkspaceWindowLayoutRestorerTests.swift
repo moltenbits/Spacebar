@@ -17,12 +17,12 @@ struct WorkspaceWindowLayoutRestorerTests {
         attempts += 1
         if attempts == 1 {
           #expect(requestedBundleIDs == nil)
-          return WorkspaceLayoutRestoreAttempt(
+          return WindowLayoutRestoreAttempt(
             hasLayout: true, movedWindows: 0,
             restoredBundleIDs: [], pendingBundleIDs: ["com.googlecode.iterm2"])
         }
         #expect(requestedBundleIDs == ["com.googlecode.iterm2"])
-        return WorkspaceLayoutRestoreAttempt(
+        return WindowLayoutRestoreAttempt(
           hasLayout: true, movedWindows: 1,
           restoredBundleIDs: ["com.googlecode.iterm2"], pendingBundleIDs: [])
       },
@@ -55,12 +55,12 @@ struct WorkspaceWindowLayoutRestorerTests {
       attempt: { _, _, _, bundleIDs in
         requested.append(bundleIDs)
         if requested.count == 1 {
-          return WorkspaceLayoutRestoreAttempt(
+          return WindowLayoutRestoreAttempt(
             hasLayout: true, movedWindows: 1,
             restoredBundleIDs: ["com.apple.Safari"],
             pendingBundleIDs: ["com.googlecode.iterm2"])
         }
-        return WorkspaceLayoutRestoreAttempt(
+        return WindowLayoutRestoreAttempt(
           hasLayout: true, movedWindows: 1,
           restoredBundleIDs: ["com.googlecode.iterm2"], pendingBundleIDs: [])
       },
@@ -85,7 +85,7 @@ struct WorkspaceWindowLayoutRestorerTests {
       retryInterval: 0.25,
       prepare: { _, _, _, _ in false },
       attempt: { _, _, _, _ in
-        WorkspaceLayoutRestoreAttempt(
+        WindowLayoutRestoreAttempt(
           hasLayout: false, movedWindows: 0,
           restoredBundleIDs: [], pendingBundleIDs: [])
       },
@@ -111,7 +111,7 @@ struct WorkspaceWindowLayoutRestorerTests {
       retryInterval: 0.25,
       prepare: { _, _, _, _ in true },
       attempt: { _, _, _, _ in
-        WorkspaceLayoutRestoreAttempt(
+        WindowLayoutRestoreAttempt(
           hasLayout: true, movedWindows: 0,
           restoredBundleIDs: [], pendingBundleIDs: ["com.missing.app"])
       },

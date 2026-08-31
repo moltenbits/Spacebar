@@ -811,6 +811,15 @@ public class SpaceManager {
 
   // MARK: - Space Creation
 
+  /// Resolves the display used by Space creation. Workspace/default-space
+  /// callers omit an override so creation remains on the primary display.
+  static func creationDisplayID(
+    requested: CGDirectDisplayID?,
+    primary: CGDirectDisplayID
+  ) -> CGDirectDisplayID {
+    requested ?? primary
+  }
+
   /// Creates a new desktop Space via the Dock's accessibility interface.
   /// Opens Mission Control, finds the "Add Desktop" button in the Spaces Bar,
   /// and clicks it.
@@ -881,7 +890,9 @@ public class SpaceManager {
       // their windows into a surviving space, so workspace/default spaces must
       // never live on removable displays.
       let addResult: (button: AXUIElement, mcSpaces: AXUIElement)? = {
-        let requestedScreen = screenNumber ?? CGMainDisplayID()
+        let requestedScreen = Self.creationDisplayID(
+          requested: screenNumber,
+          primary: CGMainDisplayID())
         let displayElements: [AXUIElement]
         if let targetDisplay = Self.axChildMatchingDisplay(
           mcGroup, screenNumber: requestedScreen)

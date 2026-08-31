@@ -42,7 +42,7 @@ struct WorkspaceRestorerTests {
       },
       attempt: { _, _, _, _ in
         restoredAfterLaunch = launched
-        return WorkspaceLayoutRestoreAttempt(
+        return WindowLayoutRestoreAttempt(
           hasLayout: true, movedWindows: 1,
           restoredBundleIDs: ["com.googlecode.iterm2"], pendingBundleIDs: [])
       },
@@ -95,7 +95,7 @@ struct WorkspaceRestorerTests {
       },
       attempt: { _, _, _, _ in
         attempts += 1
-        return WorkspaceLayoutRestoreAttempt(
+        return WindowLayoutRestoreAttempt(
           hasLayout: true, movedWindows: 1,
           restoredBundleIDs: ["com.googlecode.iterm2"], pendingBundleIDs: [])
       },
@@ -147,7 +147,7 @@ struct WorkspaceRestorerTests {
       prepare: { _, _, _, _ in true },
       attempt: { workspaceID, _, _, _ in
         attemptedWorkspaces.append(workspaceID)
-        return WorkspaceLayoutRestoreAttempt(
+        return WindowLayoutRestoreAttempt(
           hasLayout: true, movedWindows: 0,
           restoredBundleIDs: [], pendingBundleIDs: ["com.missing.app"])
       },
