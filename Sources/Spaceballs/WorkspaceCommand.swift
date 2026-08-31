@@ -51,7 +51,7 @@ struct RestoreWorkspaceCommand: ParsableCommand {
         launchers: ws.launchers.map { l in
           LauncherData(
             label: l.label,
-            type: l.type.rawValue,
+            type: l.type,
             command: l.command,
             appName: l.appName,
             bundleID: l.bundleID)
@@ -119,6 +119,7 @@ struct ListWorkspacesCommand: ParsableCommand {
         case .shell: typeIcon = "⌘"
         case .applescript: typeIcon = "📜"
         case .open: typeIcon = "📂"
+        case .launchServices: typeIcon = "🚀"
         }
         print("    \(typeIcon) \(launcher.label): \(launcher.command)")
       }

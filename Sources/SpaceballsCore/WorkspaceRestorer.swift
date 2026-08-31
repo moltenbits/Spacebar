@@ -34,7 +34,7 @@ struct WorkspaceRestorerHooks {
   var launcherWindows: (String) -> [WorkspaceLauncherWindow] = { _ in [] }
   var switchToSpace: (UInt64) throws -> Void
   var clickDesktop: (UInt64) -> Void
-  var executeLauncher: (String, String) throws -> Void
+  var executeLauncher: (WorkspaceLaunchRequest) throws -> Void
   var relocateFocusedWindow: (String, UInt64, Set<Int>, Bool) throws -> WorkspaceLauncherPlacement
   var bundleIDForPID: (Int) -> String? = { _ in nil }
   var relocateWindow: (Int, UInt64) throws -> Bool = { _, _ in false }
@@ -65,7 +65,7 @@ public final class WorkspaceRestorer {
       },
       switchToSpace: { try spaceManager.switchToSpace(id: $0) },
       clickDesktop: { spaceManager.clickDesktopOnDisplay(forSpaceID: $0) },
-      executeLauncher: { try Self.executeLauncher(type: $0, command: $1) },
+      executeLauncher: { try WorkspaceLauncherExecutor.live.execute($0) },
       relocateFocusedWindow: {
         bundleID, targetSpaceID, preexistingWindowIDs, allowsExistingWindow in
         try Self.relocateFocusedWindow(
@@ -185,9 +185,10 @@ public final class WorkspaceRestorer {
           preexistingWindowIDs.formUnion(
             hooks.launcherWindows(launcher.bundleID).map(\.id))
         }
-        let resolved = launcher.resolvedCommand(path: workspace.path, name: workspace.name)
+        let request = launcher.resolvedLaunchRequest(
+          path: workspace.path, name: workspace.name)
         do {
-          try hooks.executeLauncher(launcher.type, resolved)
+          try hooks.executeLauncher(request)
           appsLaunched += 1
           if launcher.bundleID.isEmpty {
             hooks.sleep(1.0)
@@ -199,12 +200,13 @@ public final class WorkspaceRestorer {
               // Built-in AppleScript templates explicitly create a new
               // window. Shell/open launchers may legitimately reactivate an
               // existing project window (Tower and IntelliJ do this).
-              allowsExistingWindow: launcher.type != "applescript")
+              allowsExistingWindow: launcher.type != .applescript)
           }
         } catch {
           errors.append(
             (
-              workspace.name, launcher.appName.isEmpty ? launcher.type : launcher.appName,
+              workspace.name,
+              launcher.appName.isEmpty ? launcher.type.rawValue : launcher.appName,
               error.localizedDescription
             ))
         }
@@ -423,55 +425,6 @@ public final class WorkspaceRestorer {
     allowsExistingWindow || !preexistingWindowIDs.contains(windowID)
   }
 
-  static func executeLauncher(type: String, command: String) throws {
-    let process = Process()
-    var outputPipe: Pipe?
-    var waitsForExit = false
-
-    switch type {
-    case "shell":
-      process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-      process.arguments = ["-c", command]
-      process.standardOutput = FileHandle.nullDevice
-      process.standardError = FileHandle.nullDevice
-    case "applescript":
-      process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-      process.arguments = ["-e", command]
-      waitsForExit = true
-    case "open":
-      process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-      process.arguments = ["-a", command]
-      waitsForExit = true
-    default:
-      throw WorkspaceRestorerError.unknownLaunchType(type)
-    }
-
-    if waitsForExit {
-      let pipe = Pipe()
-      process.standardOutput = pipe
-      process.standardError = pipe
-      outputPipe = pipe
-    }
-
-    try process.run()
-    guard let outputPipe else {
-      // Shell launchers may intentionally remain alive for the lifetime of the
-      // launched app, so they stay fire-and-forget.
-      return
-    }
-
-    outputPipe.fileHandleForWriting.closeFile()
-    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    guard process.terminationStatus != 0 else { return }
-
-    let output = String(decoding: outputData, as: UTF8.self)
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    throw WorkspaceRestorerError.launcherFailed(
-      type: type,
-      status: process.terminationStatus,
-      output: output)
-  }
 }
 
 /// Lightweight data transfer struct so WorkspaceRestorer doesn't depend on
@@ -492,14 +445,14 @@ public struct WorkspaceConfigData {
 
 public struct LauncherData {
   public let label: String
-  public let type: String  // "shell", "applescript", "open"
+  public let type: WorkspaceLaunchType
   public let command: String
   public let appName: String
   public let bundleID: String
 
   public init(
     label: String,
-    type: String,
+    type: WorkspaceLaunchType,
     command: String,
     appName: String = "",
     bundleID: String = ""
@@ -523,20 +476,20 @@ public struct LauncherData {
     cmd = cmd.replacingOccurrences(of: "${LABEL}", with: resolvedProfile)
     return cmd
   }
+
+  func resolvedLaunchRequest(path: String?, name: String) -> WorkspaceLaunchRequest {
+    WorkspaceLaunchRequest(
+      type: type,
+      command: resolvedCommand(path: path, name: name),
+      bundleID: bundleID)
+  }
 }
 
 public enum WorkspaceRestorerError: Error, LocalizedError {
-  case unknownLaunchType(String)
-  case launcherFailed(type: String, status: Int32, output: String)
   case windowRelocationFailed(windowID: Int, targetSpaceID: UInt64)
 
   public var errorDescription: String? {
     switch self {
-    case .unknownLaunchType(let type):
-      return "Unknown launch type: \(type)"
-    case .launcherFailed(let type, let status, let output):
-      let detail = output.isEmpty ? "no error output" : output
-      return "\(type) launcher exited with status \(status): \(detail)"
     case .windowRelocationFailed(let windowID, let targetSpaceID):
       return "Failed to move window \(windowID) to Space \(targetSpaceID)"
     }

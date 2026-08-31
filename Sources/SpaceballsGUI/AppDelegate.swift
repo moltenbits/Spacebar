@@ -1214,7 +1214,7 @@ extension AppDelegate: KeyInterceptorDelegate {
             launchers: ws.launchers.map { l in
               LauncherData(
                 label: l.label,
-                type: l.type.rawValue,
+                type: l.type,
                 command: l.command,
                 appName: l.appName,
                 bundleID: l.bundleID)

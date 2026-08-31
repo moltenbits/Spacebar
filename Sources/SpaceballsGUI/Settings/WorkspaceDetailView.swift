@@ -215,17 +215,42 @@ struct LauncherDetailView: View {
             }
           }
 
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Command").font(.caption).foregroundStyle(.secondary)
-            TextEditor(
-              text: $settings.workspaces[workspaceIndex].launchers[launcherIndex].command
-            )
-            .font(.system(.body, design: .monospaced))
-            .frame(maxWidth: .infinity, minHeight: 150)
-            .overlay(
-              RoundedRectangle(cornerRadius: 5)
-                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-            )
+          if launcher.type == .launchServices {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Path or URL").font(.caption).foregroundStyle(.secondary)
+              TextField(
+                "Optional — $PATH opens the workspace project",
+                text: $settings.workspaces[workspaceIndex].launchers[launcherIndex].command
+              )
+              .textFieldStyle(.roundedBorder)
+              Text(
+                "Launch Services opens this resource with the Bundle ID above. Leave it blank to launch the app without a resource."
+              )
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            }
+          } else {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(launcher.type == .applescript ? "Script" : "Command")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              TextEditor(
+                text: $settings.workspaces[workspaceIndex].launchers[launcherIndex].command
+              )
+              .font(.system(.body, design: .monospaced))
+              .frame(maxWidth: .infinity, minHeight: 150)
+              .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                  .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+              )
+              if launcher.type == .applescript {
+                Text(
+                  "When a Bundle ID is set, Spaceballs launches that app through Launch Services before running the script."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              }
+            }
           }
         }
         .padding(16)

@@ -54,7 +54,7 @@ struct WorkspaceRestorerTests {
       windowsBySpace: { [:] },
       switchToSpace: { _ in },
       clickDesktop: { _ in },
-      executeLauncher: { _, _ in launched = true },
+      executeLauncher: { _ in launched = true },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
     let restorer = WorkspaceRestorer(
@@ -68,7 +68,7 @@ struct WorkspaceRestorerTests {
           id: "workspace-1", name: "Work", path: nil,
           launchers: [
             LauncherData(
-              label: "Terminal", type: "open", command: "iTerm", appName: "iTerm",
+              label: "Terminal", type: .open, command: "iTerm", appName: "iTerm",
               bundleID: "com.googlecode.iterm2")
           ])
       ],
@@ -109,7 +109,7 @@ struct WorkspaceRestorerTests {
       windowsBySpace: { [target.id: [existing]] },
       switchToSpace: { _ in switched = true },
       clickDesktop: { _ in },
-      executeLauncher: { _, _ in launched = true },
+      executeLauncher: { _ in launched = true },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
     let restorer = WorkspaceRestorer(
@@ -123,7 +123,7 @@ struct WorkspaceRestorerTests {
           id: "workspace-1", name: "Work", path: nil,
           launchers: [
             LauncherData(
-              label: "Terminal", type: "open", command: "iTerm", appName: "iTerm",
+              label: "Terminal", type: .open, command: "iTerm", appName: "iTerm",
               bundleID: "com.googlecode.iterm2")
           ])
       ],
@@ -158,7 +158,7 @@ struct WorkspaceRestorerTests {
       windowsBySpace: { [:] },
       switchToSpace: { _ in },
       clickDesktop: { _ in },
-      executeLauncher: { _, _ in },
+      executeLauncher: { _ in },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
     let restorer = WorkspaceRestorer(
@@ -170,10 +170,10 @@ struct WorkspaceRestorerTests {
       workspaces: [
         WorkspaceConfigData(
           id: "workspace-1", name: "First", path: nil,
-          launchers: [LauncherData(label: "One", type: "open", command: "One")]),
+          launchers: [LauncherData(label: "One", type: .open, command: "One")]),
         WorkspaceConfigData(
           id: "workspace-2", name: "Second", path: nil,
-          launchers: [LauncherData(label: "Two", type: "open", command: "Two")]),
+          launchers: [LauncherData(label: "Two", type: .open, command: "Two")]),
       ],
       defaultNames: ["First", "Second"])
 
@@ -212,9 +212,9 @@ struct WorkspaceRestorerTests {
         currentSpaceID = target
       },
       clickDesktop: { _ in },
-      executeLauncher: { _, command in
+      executeLauncher: { request in
         #expect(currentSpaceID == targetID)
-        launches.append(command)
+        launches.append(request.command)
       },
       relocateFocusedWindow: { bundleID, target, _, allowsExistingWindow in
         relocations.append((bundleID, target))
@@ -244,10 +244,10 @@ struct WorkspaceRestorerTests {
           id: "workspace-1", name: "Work", path: nil,
           launchers: [
             LauncherData(
-              label: "Tower", type: "open", command: "Tower", appName: "Tower",
+              label: "Tower", type: .open, command: "Tower", appName: "Tower",
               bundleID: "com.fournova.Tower3"),
             LauncherData(
-              label: "Safari", type: "applescript", command: "Safari", appName: "Safari",
+              label: "Safari", type: .applescript, command: "Safari", appName: "Safari",
               bundleID: "com.apple.Safari"),
           ])
       ],
@@ -260,6 +260,42 @@ struct WorkspaceRestorerTests {
         "com.fournova.Tower3", "com.fournova.Tower3", "com.apple.Safari",
       ])
     #expect(currentSpaceID == targetID)
+  }
+
+  @Test("Launch Services receives the resolved workspace target and bundle ID")
+  func launchServicesRequestIsResolved() throws {
+    let target = space(id: 101, uuid: "space-work")
+    let names = makeNameStore([target.uuid: "My Work"])
+    var capturedRequest: WorkspaceLaunchRequest?
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 },
+      allSpaces: { [target] },
+      windowsBySpace: { [:] },
+      switchToSpace: { _ in },
+      clickDesktop: { _ in },
+      executeLauncher: { capturedRequest = $0 },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: names,
+      windowLayoutRestorer: nil,
+      hooks: hooks)
+
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "workspace-1", name: "My Work", path: "~/Projects/example",
+          launchers: [
+            LauncherData(
+              label: "IDE", type: .launchServices, command: "$PATH",
+              appName: "IntelliJ IDEA", bundleID: "com.jetbrains.intellij")
+          ])
+      ],
+      defaultNames: ["My Work"])
+
+    #expect(capturedRequest?.type == .launchServices)
+    #expect(capturedRequest?.command == NSString(string: "~/Projects/example").expandingTildeInPath)
+    #expect(capturedRequest?.bundleID == "com.jetbrains.intellij")
   }
 
   @Test("New-window launchers never relocate a pre-existing window")
@@ -353,7 +389,7 @@ struct WorkspaceRestorerTests {
       },
       switchToSpace: { _ in },
       clickDesktop: { _ in },
-      executeLauncher: { _, _ in launched = true },
+      executeLauncher: { _ in launched = true },
       relocateFocusedWindow: { _, _, _, _ in
         focusedWindowAttempts += 1
         return .waiting
@@ -382,7 +418,7 @@ struct WorkspaceRestorerTests {
           id: "workspace-1", name: "Work", path: nil,
           launchers: [
             LauncherData(
-              label: "Terminal", type: "applescript", command: "iTerm",
+              label: "Terminal", type: .applescript, command: "iTerm",
               appName: "iTerm", bundleID: "com.googlecode.iterm2")
           ])
       ],
@@ -414,7 +450,7 @@ struct WorkspaceRestorerTests {
       },
       switchToSpace: { _ in },
       clickDesktop: { _ in },
-      executeLauncher: { _, _ in launched = true },
+      executeLauncher: { _ in launched = true },
       relocateFocusedWindow: { _, _, _, _ in
         focusedWindowAttempts += 1
         return .waiting
@@ -436,7 +472,7 @@ struct WorkspaceRestorerTests {
           id: "workspace-1", name: "Work", path: nil,
           launchers: [
             LauncherData(
-              label: "Terminal", type: "applescript", command: "iTerm",
+              label: "Terminal", type: .applescript, command: "iTerm",
               appName: "iTerm", bundleID: "com.googlecode.iterm2")
           ])
       ],
@@ -449,9 +485,11 @@ struct WorkspaceRestorerTests {
   @Test("AppleScript launcher failures are surfaced")
   func appleScriptLauncherFailuresAreSurfaced() {
     do {
-      try WorkspaceRestorer.executeLauncher(
-        type: "applescript",
-        command: "error \"cold launch failed\" number 42")
+      try WorkspaceLauncherExecutor.live.execute(
+        WorkspaceLaunchRequest(
+          type: .applescript,
+          command: "error \"cold launch failed\" number 42",
+          bundleID: ""))
       Issue.record("Expected the failing AppleScript launcher to throw")
     } catch {
       #expect(error.localizedDescription.contains("cold launch failed"))

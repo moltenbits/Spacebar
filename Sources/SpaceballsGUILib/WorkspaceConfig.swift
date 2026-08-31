@@ -1,19 +1,17 @@
 import Foundation
+import SpaceballsCore
 
 // MARK: - Launch Type
 
-public enum LaunchType: String, Codable, CaseIterable, Identifiable {
-  case shell
-  case applescript
-  case open
+public typealias LaunchType = WorkspaceLaunchType
 
-  public var id: String { rawValue }
-
+extension WorkspaceLaunchType {
   public var label: String {
     switch self {
     case .shell: "Shell command"
     case .applescript: "AppleScript"
     case .open: "Open application"
+    case .launchServices: "Launch Services"
     }
   }
 }
@@ -30,12 +28,54 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
     end tell
     """
 
-  static let iTermCommand = """
+  static let shellLaunchingITermCommand = """
     do shell script "/usr/bin/open -g -b com.googlecode.iterm2"
     tell application "iTerm"
       set newWindow to (create window with default profile)
       tell current session of newWindow
         write text "cd $PATH"
+      end tell
+    end tell
+    """
+
+  static let iTermCommand = legacyITermCommand
+
+  static let shellLaunchingSafariCommand = """
+    tell application "System Events"
+      if not (exists process "Safari") then
+        do shell script "open -a Safari"
+        delay 1
+      end if
+      tell process "Safari"
+        click menu item "New Window" of menu 1 of menu bar item "File" of menu bar 1
+      end tell
+    end tell
+    """
+
+  static let safariCommand = """
+    tell application "System Events"
+      tell process "Safari"
+        click menu item "New Window" of menu 1 of menu bar item "File" of menu bar 1
+      end tell
+    end tell
+    """
+
+  static let shellLaunchingSafariProfileCommand = """
+    tell application "System Events"
+      if not (exists process "Safari") then
+        do shell script "open -a Safari"
+        delay 1
+      end if
+      tell process "Safari"
+        click menu item "New $PROFILE Window" of menu 1 of menu item "New Window" of menu 1 of menu bar item "File" of menu bar 1
+      end tell
+    end tell
+    """
+
+  static let safariProfileCommand = """
+    tell application "System Events"
+      tell process "Safari"
+        click menu item "New $PROFILE Window" of menu 1 of menu item "New Window" of menu 1 of menu bar item "File" of menu bar 1
       end tell
     end tell
     """
@@ -72,14 +112,16 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     id = try c.decode(UUID.self, forKey: .id)
     label = try c.decode(String.self, forKey: .label)
-    type = try c.decode(LaunchType.self, forKey: .type)
+    let decodedType = try c.decode(LaunchType.self, forKey: .type)
     let decodedCommand = try c.decode(String.self, forKey: .command)
     appName = try c.decodeIfPresent(String.self, forKey: .appName) ?? ""
     bundleID =
       try c.decodeIfPresent(String.self, forKey: .bundleID)
       ?? Self.knownBundleID(forAppName: appName)
-    command = Self.migratedCommand(
-      decodedCommand, type: type, bundleID: bundleID)
+    let migrated = Self.migratedLauncher(
+      command: decodedCommand, type: decodedType, bundleID: bundleID)
+    type = migrated.type
+    command = migrated.command
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -96,16 +138,24 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
     }
   }
 
-  private static func migratedCommand(
-    _ command: String, type: LaunchType, bundleID: String
-  ) -> String {
-    guard type == .applescript,
-      bundleID == "com.googlecode.iterm2",
-      command == legacyITermCommand
-    else {
-      return command
+  private static func migratedLauncher(
+    command: String, type: LaunchType, bundleID: String
+  ) -> (type: LaunchType, command: String) {
+    switch (type, bundleID, command) {
+    case (.applescript, "com.googlecode.iterm2", legacyITermCommand),
+      (.applescript, "com.googlecode.iterm2", shellLaunchingITermCommand):
+      return (.applescript, iTermCommand)
+    case (.applescript, "com.apple.Safari", shellLaunchingSafariCommand):
+      return (.applescript, safariCommand)
+    case (.applescript, "com.apple.Safari", shellLaunchingSafariProfileCommand):
+      return (.applescript, safariProfileCommand)
+    case (.shell, "com.jetbrains.intellij", "idea \"$PATH\""):
+      return (.launchServices, "$PATH")
+    case (.shell, "com.fournova.Tower3", "gittower \"$PATH\""):
+      return (.launchServices, "$PATH")
+    default:
+      return (type, command)
     }
-    return iTermCommand
   }
 
   /// Returns the command with workspace variables substituted.
@@ -166,6 +216,8 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
   case safari
   case safariProfile
   case genericOpen
+  case genericLaunchServices
+  case genericAppleScript
   case genericShell
 
   public var id: String { rawValue }
@@ -178,6 +230,8 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
     case .safari: "Safari"
     case .safariProfile: "Safari (Profile)"
     case .genericOpen: "Open App"
+    case .genericLaunchServices: "Launch Services"
+    case .genericAppleScript: "AppleScript"
     case .genericShell: "Shell Command"
     }
   }
@@ -195,18 +249,18 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
     case .intellij:
       return AppLauncher(
         label: "",
-        type: .shell,
+        type: .launchServices,
         appName: "IntelliJ IDEA",
         bundleID: "com.jetbrains.intellij",
-        command: "idea \"$PATH\""
+        command: "$PATH"
       )
     case .tower:
       return AppLauncher(
         label: "",
-        type: .shell,
+        type: .launchServices,
         appName: "Tower",
         bundleID: "com.fournova.Tower3",
-        command: "gittower \"$PATH\""
+        command: "$PATH"
       )
     case .safari:
       return AppLauncher(
@@ -214,17 +268,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         type: .applescript,
         appName: "Safari",
         bundleID: "com.apple.Safari",
-        command: """
-          tell application "System Events"
-            if not (exists process "Safari") then
-              do shell script "open -a Safari"
-              delay 1
-            end if
-            tell process "Safari"
-              click menu item "New Window" of menu 1 of menu bar item "File" of menu bar 1
-            end tell
-          end tell
-          """
+        command: AppLauncher.safariCommand
       )
     case .safariProfile:
       return AppLauncher(
@@ -232,23 +276,25 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         type: .applescript,
         appName: "Safari",
         bundleID: "com.apple.Safari",
-        command: """
-          tell application "System Events"
-            if not (exists process "Safari") then
-              do shell script "open -a Safari"
-              delay 1
-            end if
-            tell process "Safari"
-              click menu item "New $PROFILE Window" of menu 1 of menu item "New Window" of menu 1 of menu bar item "File" of menu bar 1
-            end tell
-          end tell
-          """
+        command: AppLauncher.safariProfileCommand
       )
     case .genericOpen:
       return AppLauncher(
         label: "App",
         type: .open,
         command: "AppName"
+      )
+    case .genericLaunchServices:
+      return AppLauncher(
+        label: "App",
+        type: .launchServices,
+        command: "$PATH"
+      )
+    case .genericAppleScript:
+      return AppLauncher(
+        label: "Script",
+        type: .applescript,
+        command: "-- Enter AppleScript here"
       )
     case .genericShell:
       return AppLauncher(
