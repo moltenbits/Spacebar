@@ -5,10 +5,82 @@ import Testing
 
 @Suite("Workspace Launcher Execution")
 struct WorkspaceLauncherExecutorTests {
+  @Test("Composed launchers execute each typed step in order")
+  func composedLauncherOrder() throws {
+    var events: [String] = []
+    let executor = WorkspaceLauncherExecutor(
+      runProcess: { executable, arguments, waitsForExit in
+        events.append(executable.lastPathComponent)
+        #expect(arguments == ["-e", "tell application \"iTerm\" to activate"])
+        #expect(waitsForExit)
+      },
+      openWithLaunchServices: { request in
+        events.append("launch-services")
+        #expect(request.bundleID == "com.googlecode.iterm2")
+        #expect(request.target == nil)
+      })
+
+    try executor.execute(
+      WorkspaceLaunchRequest(
+        steps: [
+          .launchServices(WorkspaceLaunchServicesConfiguration()),
+          .appleScript("tell application \"iTerm\" to activate"),
+        ],
+        bundleID: "com.googlecode.iterm2"))
+
+    #expect(events == ["launch-services", "osascript"])
+  }
+
+  @Test("Launch Services receives arguments, environment, and instance policy")
+  func launchServicesConfiguration() throws {
+    var captured: WorkspaceLaunchServicesRequest?
+    let executor = WorkspaceLauncherExecutor(
+      runProcess: { _, _, _ in },
+      openWithLaunchServices: { captured = $0 })
+
+    try executor.execute(
+      WorkspaceLaunchRequest(
+        steps: [
+          .launchServices(
+            WorkspaceLaunchServicesConfiguration(
+              target: "/Users/example/Project",
+              arguments: ["--line", "42"],
+              environment: [
+                WorkspaceEnvironmentVariable(name: "PROJECT", value: "/Users/example/Project"),
+                WorkspaceEnvironmentVariable(name: "EMPTY_KEY_IS_IGNORED", value: "first"),
+                WorkspaceEnvironmentVariable(name: "", value: "ignored"),
+                WorkspaceEnvironmentVariable(name: "EMPTY_KEY_IS_IGNORED", value: "last"),
+              ],
+              createsNewApplicationInstance: true))
+        ],
+        bundleID: "com.example.Editor"))
+
+    guard let captured else {
+      Issue.record("Expected the Launch Services request")
+      return
+    }
+    #expect(captured.bundleID == "com.example.Editor")
+    #expect(captured.target?.path == "/Users/example/Project")
+    #expect(captured.arguments == ["--line", "42"])
+    #expect(
+      captured.environment == [
+        "PROJECT": "/Users/example/Project", "EMPTY_KEY_IS_IGNORED": "last",
+      ])
+    #expect(captured.createsNewApplicationInstance)
+
+    let openConfiguration = WorkspaceLauncherExecutor.openConfiguration(for: captured)
+    #expect(openConfiguration.arguments == ["--line", "42"])
+    #expect(
+      openConfiguration.environment == [
+        "PROJECT": "/Users/example/Project", "EMPTY_KEY_IS_IGNORED": "last",
+      ])
+    #expect(openConfiguration.createsNewApplicationInstance)
+  }
+
   @Test("Launch Services opens a file target with the configured bundle")
   func launchServicesOpensTarget() throws {
     var processCalls: [ProcessCall] = []
-    var launchCalls: [(bundleID: String, target: URL?)] = []
+    var launchCalls: [WorkspaceLaunchServicesRequest] = []
     let executor = WorkspaceLauncherExecutor(
       runProcess: { executable, arguments, waitsForExit in
         processCalls.append(
@@ -16,14 +88,14 @@ struct WorkspaceLauncherExecutorTests {
             executable: executable, arguments: arguments,
             waitsForExit: waitsForExit))
       },
-      openWithLaunchServices: { bundleID, target in
-        launchCalls.append((bundleID, target))
-      })
+      openWithLaunchServices: { launchCalls.append($0) })
 
     try executor.execute(
       WorkspaceLaunchRequest(
-        type: .launchServices,
-        command: "/Users/example/My Project",
+        steps: [
+          .launchServices(
+            WorkspaceLaunchServicesConfiguration(target: "/Users/example/My Project"))
+        ],
         bundleID: "com.jetbrains.intellij"))
 
     #expect(processCalls.isEmpty)
@@ -35,14 +107,15 @@ struct WorkspaceLauncherExecutorTests {
 
   @Test("Launch Services launches an app when the target is empty")
   func launchServicesOpensApplication() throws {
-    var launchCalls: [(bundleID: String, target: URL?)] = []
+    var launchCalls: [WorkspaceLaunchServicesRequest] = []
     let executor = WorkspaceLauncherExecutor(
       runProcess: { _, _, _ in },
-      openWithLaunchServices: { launchCalls.append(($0, $1)) })
+      openWithLaunchServices: { launchCalls.append($0) })
 
     try executor.execute(
       WorkspaceLaunchRequest(
-        type: .launchServices, command: "", bundleID: "com.apple.TextEdit"))
+        steps: [.launchServices(WorkspaceLaunchServicesConfiguration())],
+        bundleID: "com.apple.TextEdit"))
 
     #expect(launchCalls.count == 1)
     #expect(launchCalls.first?.bundleID == "com.apple.TextEdit")
@@ -54,40 +127,39 @@ struct WorkspaceLauncherExecutorTests {
     var target: URL?
     let executor = WorkspaceLauncherExecutor(
       runProcess: { _, _, _ in },
-      openWithLaunchServices: { _, openedTarget in target = openedTarget })
+      openWithLaunchServices: { target = $0.target })
 
     try executor.execute(
       WorkspaceLaunchRequest(
-        type: .launchServices,
-        command: "https://example.com/project",
+        steps: [
+          .launchServices(
+            WorkspaceLaunchServicesConfiguration(target: "https://example.com/project"))
+        ],
         bundleID: "com.apple.Safari"))
 
     #expect(target?.absoluteString == "https://example.com/project")
   }
 
-  @Test("AppleScript launchers use Launch Services before running their script")
-  func appleScriptLaunchOrder() throws {
-    var events: [String] = []
+  @Test("AppleScript steps do not hide an implicit application launch")
+  func appleScriptHasNoImplicitLaunch() throws {
+    var processRan = false
     let executor = WorkspaceLauncherExecutor(
       runProcess: { executable, arguments, waitsForExit in
-        events.append("process")
+        processRan = true
         #expect(executable.path == "/usr/bin/osascript")
         #expect(arguments == ["-e", "tell application \"iTerm\" to activate"])
         #expect(waitsForExit)
       },
-      openWithLaunchServices: { bundleID, target in
-        events.append("launch-services")
-        #expect(bundleID == "com.googlecode.iterm2")
-        #expect(target == nil)
+      openWithLaunchServices: { _ in
+        Issue.record("AppleScript must launch an app only through an explicit prior step")
       })
 
     try executor.execute(
       WorkspaceLaunchRequest(
-        type: .applescript,
-        command: "tell application \"iTerm\" to activate",
+        steps: [.appleScript("tell application \"iTerm\" to activate")],
         bundleID: "com.googlecode.iterm2"))
 
-    #expect(events == ["launch-services", "process"])
+    #expect(processRan)
   }
 
   @Test("Generic AppleScripts run without requiring an application bundle")
@@ -101,11 +173,11 @@ struct WorkspaceLauncherExecutorTests {
             executable: executable, arguments: arguments,
             waitsForExit: waitsForExit))
       },
-      openWithLaunchServices: { _, _ in launched = true })
+      openWithLaunchServices: { _ in launched = true })
 
     try executor.execute(
       WorkspaceLaunchRequest(
-        type: .applescript, command: "display dialog \"Hello\"", bundleID: ""))
+        steps: [.appleScript("display dialog \"Hello\"")], bundleID: ""))
 
     #expect(!launched)
     #expect(processCalls.count == 1)
@@ -123,13 +195,13 @@ struct WorkspaceLauncherExecutorTests {
           executable: executable, arguments: arguments,
           waitsForExit: waitsForExit)
       },
-      openWithLaunchServices: { _, _ in
+      openWithLaunchServices: { _ in
         Issue.record("Shell launchers must not invoke Launch Services")
       })
 
     try executor.execute(
       WorkspaceLaunchRequest(
-        type: .shell, command: "echo hello", bundleID: ""))
+        steps: [.shell("echo hello")], bundleID: ""))
 
     #expect(processCall?.executable.path == "/bin/zsh")
     #expect(processCall?.arguments == ["-c", "echo hello"])
@@ -145,12 +217,12 @@ struct WorkspaceLauncherExecutorTests {
           executable: executable, arguments: arguments,
           waitsForExit: waitsForExit)
       },
-      openWithLaunchServices: { _, _ in
+      openWithLaunchServices: { _ in
         Issue.record("Legacy open launchers use the open command")
       })
 
     try executor.execute(
-      WorkspaceLaunchRequest(type: .open, command: "Preview", bundleID: ""))
+      WorkspaceLaunchRequest(steps: [.openApplication("Preview")], bundleID: ""))
 
     #expect(processCall?.executable.path == "/usr/bin/open")
     #expect(processCall?.arguments == ["-a", "Preview"])
@@ -161,12 +233,50 @@ struct WorkspaceLauncherExecutorTests {
   func launchServicesRequiresBundleID() {
     let executor = WorkspaceLauncherExecutor(
       runProcess: { _, _, _ in },
-      openWithLaunchServices: { _, _ in })
+      openWithLaunchServices: { _ in })
 
     #expect(throws: WorkspaceLauncherError.self) {
       try executor.execute(
-        WorkspaceLaunchRequest(type: .launchServices, command: "/tmp", bundleID: ""))
+        WorkspaceLaunchRequest(
+          steps: [
+            .launchServices(WorkspaceLaunchServicesConfiguration(target: "/tmp"))
+          ],
+          bundleID: ""))
     }
+  }
+
+  @Test("A failed step stops the remaining composition")
+  func failedStepStopsComposition() {
+    var processRan = false
+    let executor = WorkspaceLauncherExecutor(
+      runProcess: { _, _, _ in processRan = true },
+      openWithLaunchServices: { _ in throw TestError.launchFailed })
+
+    #expect(throws: TestError.self) {
+      try executor.execute(
+        WorkspaceLaunchRequest(
+          steps: [
+            .launchServices(WorkspaceLaunchServicesConfiguration()),
+            .appleScript("display dialog \"must not run\""),
+          ],
+          bundleID: "com.example.App"))
+    }
+    #expect(!processRan)
+  }
+
+  @Test("An empty composition is rejected")
+  func emptyCompositionIsRejected() {
+    let executor = WorkspaceLauncherExecutor(
+      runProcess: { _, _, _ in },
+      openWithLaunchServices: { _ in })
+
+    #expect(throws: WorkspaceLauncherError.self) {
+      try executor.execute(WorkspaceLaunchRequest(steps: [], bundleID: ""))
+    }
+  }
+
+  private enum TestError: Error {
+    case launchFailed
   }
 
   private struct ProcessCall {

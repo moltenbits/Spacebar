@@ -1,10 +1,57 @@
 import Foundation
+import SpaceballsCore
 import Testing
 
 @testable import SpaceballsGUILib
 
 @Suite("Workspace Launcher Bundle IDs")
 struct WorkspaceConfigTests {
+  @Test("Window-specific templates explicitly compose Launch Services and AppleScript")
+  func windowSpecificTemplatesAreComposed() {
+    let iterm = LauncherTemplate.iterm.launcher
+    let safari = LauncherTemplate.safari.launcher
+    let safariProfile = LauncherTemplate.safariProfile.launcher
+
+    #expect(iterm.steps.map(\.type) == [.launchServices, .applescript])
+    #expect(safari.steps.map(\.type) == [.launchServices, .applescript])
+    #expect(safariProfile.steps.map(\.type) == [.launchServices, .applescript])
+
+    guard case .launchServices(let launch) = iterm.steps[0].action,
+      case .appleScript(let script) = iterm.steps[1].action
+    else {
+      Issue.record("Expected iTerm to launch first and configure its window second")
+      return
+    }
+    #expect(launch.target.isEmpty)
+    #expect(script.contains("create window with default profile"))
+  }
+
+  @Test("A composed launcher round-trips typed per-step configuration")
+  func composedLauncherRoundTrip() throws {
+    let original = AppLauncher(
+      label: "Configured App",
+      appName: "Configured App",
+      bundleID: "com.example.configured",
+      steps: [
+        WorkspaceLauncherStep(
+          action: .launchServices(
+            WorkspaceLaunchServicesConfiguration(
+              target: "$PATH",
+              arguments: ["--workspace", "$NAME"],
+              environment: [
+                WorkspaceEnvironmentVariable(name: "PROJECT_ROOT", value: "$PATH")
+              ],
+              createsNewApplicationInstance: true))),
+        WorkspaceLauncherStep(
+          action: .appleScript("tell application \"Configured App\" to activate")),
+      ])
+
+    let decoded = try JSONDecoder().decode(
+      AppLauncher.self, from: JSONEncoder().encode(original))
+
+    #expect(decoded == original)
+  }
+
   @Test("Legacy launchers infer known bundle IDs from their app names")
   func legacyLauncherBundleIDMigration() throws {
     let id = UUID()
@@ -27,33 +74,36 @@ struct WorkspaceConfigTests {
   @Test("Standard launcher templates declare their launch mechanism and application bundle")
   func standardTemplateConfiguration() {
     #expect(LauncherTemplate.iterm.launcher.bundleID == "com.googlecode.iterm2")
-    #expect(LauncherTemplate.iterm.launcher.type == .applescript)
-    #expect(!LauncherTemplate.iterm.launcher.command.contains("do shell script"))
 
     #expect(LauncherTemplate.intellij.launcher.bundleID == "com.jetbrains.intellij")
-    #expect(LauncherTemplate.intellij.launcher.type == .launchServices)
-    #expect(LauncherTemplate.intellij.launcher.command == "$PATH")
+    #expect(LauncherTemplate.intellij.launcher.steps.map(\.type) == [.launchServices])
+    guard
+      case .launchServices(let intelliJConfiguration) =
+        LauncherTemplate.intellij.launcher.steps[0].action
+    else {
+      Issue.record("Expected the IntelliJ Launch Services configuration")
+      return
+    }
+    #expect(intelliJConfiguration.target == "$PATH")
 
     #expect(LauncherTemplate.tower.launcher.bundleID == "com.fournova.Tower3")
-    #expect(LauncherTemplate.tower.launcher.type == .launchServices)
-    #expect(LauncherTemplate.tower.launcher.command == "$PATH")
+    #expect(LauncherTemplate.tower.launcher.steps.map(\.type) == [.launchServices])
 
     #expect(LauncherTemplate.safari.launcher.bundleID == "com.apple.Safari")
-    #expect(LauncherTemplate.safari.launcher.type == .applescript)
-    #expect(!LauncherTemplate.safari.launcher.command.contains("do shell script"))
 
     #expect(LauncherTemplate.safariProfile.launcher.bundleID == "com.apple.Safari")
     #expect(LauncherTemplate.genericOpen.launcher.bundleID.isEmpty)
     #expect(LauncherTemplate.genericShell.launcher.bundleID.isEmpty)
-    #expect(LauncherTemplate.genericAppleScript.launcher.type == .applescript)
+    #expect(LauncherTemplate.genericAppleScript.launcher.steps.map(\.type) == [.applescript])
     #expect(LauncherTemplate.genericAppleScript.launcher.bundleID.isEmpty)
-    #expect(LauncherTemplate.genericLaunchServices.launcher.type == .launchServices)
+    #expect(
+      LauncherTemplate.genericLaunchServices.launcher.steps.map(\.type) == [.launchServices])
     #expect(LauncherTemplate.genericLaunchServices.launcher.bundleID.isEmpty)
   }
 
-  @Test("Legacy stock iTerm launchers delegate cold launch to Launch Services")
+  @Test("Legacy stock iTerm launchers migrate to an explicit composed pipeline")
   func legacyITermLauncherLaunchServicesMigration() throws {
-    let legacy = AppLauncher(
+    let migrated = try decodeLegacyLauncher(
       type: .applescript,
       appName: "iTerm",
       bundleID: "com.googlecode.iterm2",
@@ -66,17 +116,18 @@ struct WorkspaceConfigTests {
         end tell
         """)
 
-    let migrated = try JSONDecoder().decode(
-      AppLauncher.self, from: JSONEncoder().encode(legacy))
-
-    #expect(!migrated.command.contains("do shell script"))
-    #expect(migrated.command.contains("create window with default profile"))
-    #expect(migrated.type == .applescript)
+    #expect(migrated.steps.map(\.type) == [.launchServices, .applescript])
+    guard case .appleScript(let script) = migrated.steps[1].action else {
+      Issue.record("Expected the migrated iTerm configuration step")
+      return
+    }
+    #expect(!script.contains("do shell script"))
+    #expect(script.contains("create window with default profile"))
   }
 
   @Test("Current stock iTerm launchers remove their embedded shell launch")
   func currentITermLauncherLaunchServicesMigration() throws {
-    let current = AppLauncher(
+    let migrated = try decodeLegacyLauncher(
       type: .applescript,
       appName: "iTerm",
       bundleID: "com.googlecode.iterm2",
@@ -90,70 +141,66 @@ struct WorkspaceConfigTests {
         end tell
         """)
 
-    let migrated = try JSONDecoder().decode(
-      AppLauncher.self, from: JSONEncoder().encode(current))
-
-    #expect(!migrated.command.contains("do shell script"))
-    #expect(migrated.command.contains("create window with default profile"))
+    #expect(migrated.steps.map(\.type) == [.launchServices, .applescript])
+    guard case .appleScript(let script) = migrated.steps[1].action else {
+      Issue.record("Expected the migrated iTerm AppleScript")
+      return
+    }
+    #expect(!script.contains("do shell script"))
+    #expect(script.contains("create window with default profile"))
   }
 
   @Test("Custom iTerm AppleScripts are not replaced by the stock migration")
   func customITermLauncherIsNotMigrated() throws {
-    let custom = AppLauncher(
+    let decoded = try decodeLegacyLauncher(
       type: .applescript,
       appName: "iTerm",
       bundleID: "com.googlecode.iterm2",
       command: "tell application \"iTerm\" to create tab with default profile")
 
-    let decoded = try JSONDecoder().decode(
-      AppLauncher.self, from: JSONEncoder().encode(custom))
-
-    #expect(decoded.command == custom.command)
+    #expect(decoded.steps.map(\.type) == [.applescript])
+    #expect(
+      decoded.steps.first?.action
+        == .appleScript("tell application \"iTerm\" to create tab with default profile"))
   }
 
   @Test("Stock project launchers migrate from shell helpers to Launch Services")
   func stockProjectLauncherMigration() throws {
-    let intellij = AppLauncher(
+    let migratedIntelliJ = try decodeLegacyLauncher(
       type: .shell,
       appName: "IntelliJ IDEA",
       bundleID: "com.jetbrains.intellij",
       command: "idea \"$PATH\"")
-    let tower = AppLauncher(
+    let migratedTower = try decodeLegacyLauncher(
       type: .shell,
       appName: "Tower",
       bundleID: "com.fournova.Tower3",
       command: "gittower \"$PATH\"")
 
-    let decoder = JSONDecoder()
-    let encoder = JSONEncoder()
-    let migratedIntelliJ = try decoder.decode(
-      AppLauncher.self, from: encoder.encode(intellij))
-    let migratedTower = try decoder.decode(
-      AppLauncher.self, from: encoder.encode(tower))
-
-    #expect(migratedIntelliJ.type == .launchServices)
-    #expect(migratedIntelliJ.command == "$PATH")
-    #expect(migratedTower.type == .launchServices)
-    #expect(migratedTower.command == "$PATH")
+    #expect(migratedIntelliJ.steps.map(\.type) == [.launchServices])
+    #expect(migratedTower.steps.map(\.type) == [.launchServices])
+    guard case .launchServices(let configuration) = migratedIntelliJ.steps[0].action else {
+      Issue.record("Expected migrated IntelliJ Launch Services configuration")
+      return
+    }
+    #expect(configuration.target == "$PATH")
   }
 
   @Test("Custom project shell launchers are not migrated")
   func customProjectLauncherIsNotMigrated() throws {
-    let custom = AppLauncher(
+    let decoded = try decodeLegacyLauncher(
       type: .shell,
       appName: "IntelliJ IDEA",
       bundleID: "com.jetbrains.intellij",
       command: "idea --line 42 \"$PATH\"")
 
-    let decoded = try JSONDecoder().decode(
-      AppLauncher.self, from: JSONEncoder().encode(custom))
-
-    #expect(decoded == custom)
+    #expect(decoded.steps.map(\.type) == [.shell])
+    #expect(decoded.steps.first?.action == .shell("idea --line 42 \"$PATH\""))
   }
 
   @Test("Stock Safari scripts remove their embedded shell launch")
   func stockSafariLauncherMigration() throws {
-    let safari = AppLauncher(
+    let migratedSafari = try decodeLegacyLauncher(
       type: .applescript,
       appName: "Safari",
       bundleID: "com.apple.Safari",
@@ -168,7 +215,7 @@ struct WorkspaceConfigTests {
           end tell
         end tell
         """)
-    let safariProfile = AppLauncher(
+    let migratedSafariProfile = try decodeLegacyLauncher(
       label: "$NAME",
       type: .applescript,
       appName: "Safari",
@@ -184,18 +231,25 @@ struct WorkspaceConfigTests {
           end tell
         end tell
         """)
+    let migratedCurrentSafari = try decodeLegacyLauncher(
+      type: .applescript,
+      appName: "Safari",
+      bundleID: "com.apple.Safari",
+      command: AppLauncher.safariCommand)
 
-    let decoder = JSONDecoder()
-    let encoder = JSONEncoder()
-    let migratedSafari = try decoder.decode(
-      AppLauncher.self, from: encoder.encode(safari))
-    let migratedSafariProfile = try decoder.decode(
-      AppLauncher.self, from: encoder.encode(safariProfile))
-
-    #expect(!migratedSafari.command.contains("do shell script"))
-    #expect(migratedSafari.command.contains("New Window"))
-    #expect(!migratedSafariProfile.command.contains("do shell script"))
-    #expect(migratedSafariProfile.command.contains("New $PROFILE Window"))
+    #expect(migratedSafari.steps.map(\.type) == [.launchServices, .applescript])
+    #expect(migratedSafariProfile.steps.map(\.type) == [.launchServices, .applescript])
+    #expect(migratedCurrentSafari.steps.map(\.type) == [.launchServices, .applescript])
+    guard case .appleScript(let safariScript) = migratedSafari.steps[1].action,
+      case .appleScript(let profileScript) = migratedSafariProfile.steps[1].action
+    else {
+      Issue.record("Expected migrated Safari AppleScript steps")
+      return
+    }
+    #expect(!safariScript.contains("do shell script"))
+    #expect(safariScript.contains("New Window"))
+    #expect(!profileScript.contains("do shell script"))
+    #expect(profileScript.contains("New $PROFILE Window"))
   }
 
   @Test("Explicit bundle IDs survive encoding and decoding")
@@ -208,5 +262,24 @@ struct WorkspaceConfigTests {
       AppLauncher.self, from: JSONEncoder().encode(original))
 
     #expect(decoded == original)
+  }
+
+  private func decodeLegacyLauncher(
+    label: String = "",
+    type: LaunchType,
+    appName: String,
+    bundleID: String,
+    command: String
+  ) throws -> AppLauncher {
+    let object: [String: Any] = [
+      "id": UUID().uuidString,
+      "label": label,
+      "type": type.rawValue,
+      "command": command,
+      "appName": appName,
+      "bundleID": bundleID,
+    ]
+    return try JSONDecoder().decode(
+      AppLauncher.self, from: JSONSerialization.data(withJSONObject: object))
   }
 }

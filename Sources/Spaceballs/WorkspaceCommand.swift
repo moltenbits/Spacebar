@@ -51,8 +51,7 @@ struct RestoreWorkspaceCommand: ParsableCommand {
         launchers: ws.launchers.map { l in
           LauncherData(
             label: l.label,
-            type: l.type,
-            command: l.command,
+            steps: l.steps,
             appName: l.appName,
             bundleID: l.bundleID)
         }
@@ -114,14 +113,27 @@ struct ListWorkspacesCommand: ParsableCommand {
         ? "no apps" : "\(launcherCount) app\(launcherCount == 1 ? "" : "s")"
       print("  \(ws.name)\(pathStr) — \(badge)")
       for launcher in ws.launchers {
-        let typeIcon: String
-        switch launcher.type {
-        case .shell: typeIcon = "⌘"
-        case .applescript: typeIcon = "📜"
-        case .open: typeIcon = "📂"
-        case .launchServices: typeIcon = "🚀"
+        let launcherName = launcher.appName.isEmpty ? launcher.label : launcher.appName
+        print("    \(launcherName.isEmpty ? "Launcher" : launcherName)")
+        for step in launcher.steps {
+          let typeIcon: String
+          let detail: String
+          switch step.action {
+          case .shell(let command):
+            typeIcon = "⌘"
+            detail = command
+          case .appleScript(let source):
+            typeIcon = "📜"
+            detail = source
+          case .openApplication(let applicationName):
+            typeIcon = "📂"
+            detail = applicationName
+          case .launchServices(let configuration):
+            typeIcon = "🚀"
+            detail = configuration.target.isEmpty ? launcher.bundleID : configuration.target
+          }
+          print("      \(typeIcon) \(step.type.label): \(detail)")
         }
-        print("    \(typeIcon) \(launcher.label): \(launcher.command)")
       }
     }
   }

@@ -197,16 +197,17 @@ public final class WorkspaceRestorer {
               bundleID: launcher.bundleID,
               targetSpaceID: spaceID,
               preexistingWindowIDs: preexistingWindowIDs,
-              // Built-in AppleScript templates explicitly create a new
-              // window. Shell/open launchers may legitimately reactivate an
-              // existing project window (Tower and IntelliJ do this).
-              allowsExistingWindow: launcher.type != .applescript)
+              // Compositions containing AppleScript explicitly create a new
+              // window. Shell/open/Launch Services-only launchers may
+              // legitimately reactivate an existing project window.
+              allowsExistingWindow: !launcher.steps.contains { $0.type == .applescript })
           }
         } catch {
           errors.append(
             (
               workspace.name,
-              launcher.appName.isEmpty ? launcher.type.rawValue : launcher.appName,
+              launcher.appName.isEmpty
+                ? launcher.steps.first?.type.rawValue ?? "launcher" : launcher.appName,
               error.localizedDescription
             ))
         }
@@ -445,10 +446,21 @@ public struct WorkspaceConfigData {
 
 public struct LauncherData {
   public let label: String
-  public let type: WorkspaceLaunchType
-  public let command: String
+  public let steps: [WorkspaceLauncherStep]
   public let appName: String
   public let bundleID: String
+
+  public init(
+    label: String,
+    steps: [WorkspaceLauncherStep],
+    appName: String = "",
+    bundleID: String = ""
+  ) {
+    self.label = label
+    self.steps = steps
+    self.appName = appName
+    self.bundleID = bundleID
+  }
 
   public init(
     label: String,
@@ -457,30 +469,60 @@ public struct LauncherData {
     appName: String = "",
     bundleID: String = ""
   ) {
-    self.label = label
-    self.type = type
-    self.command = command
-    self.appName = appName
-    self.bundleID = bundleID
+    self.init(
+      label: label,
+      steps: [
+        WorkspaceLauncherStep(action: WorkspaceLauncherAction(type: type, value: command))
+      ],
+      appName: appName,
+      bundleID: bundleID)
   }
 
-  public func resolvedCommand(path: String?, name: String) -> String {
-    var cmd = command
+  private func resolvedValue(_ value: String, path: String?, name: String) -> String {
+    var resolved = value
     let expandedPath = (path as NSString?)?.expandingTildeInPath ?? ""
-    let resolvedProfile = label.isEmpty ? name : label
-    cmd = cmd.replacingOccurrences(of: "$PATH", with: expandedPath)
-    cmd = cmd.replacingOccurrences(of: "${PATH}", with: expandedPath)
-    cmd = cmd.replacingOccurrences(of: "$NAME", with: name)
-    cmd = cmd.replacingOccurrences(of: "${NAME}", with: name)
-    cmd = cmd.replacingOccurrences(of: "$PROFILE", with: resolvedProfile)
-    cmd = cmd.replacingOccurrences(of: "${LABEL}", with: resolvedProfile)
-    return cmd
+    var resolvedProfile = label.isEmpty ? name : label
+    resolvedProfile = resolvedProfile.replacingOccurrences(of: "$PATH", with: expandedPath)
+    resolvedProfile = resolvedProfile.replacingOccurrences(of: "${PATH}", with: expandedPath)
+    resolvedProfile = resolvedProfile.replacingOccurrences(of: "$NAME", with: name)
+    resolvedProfile = resolvedProfile.replacingOccurrences(of: "${NAME}", with: name)
+    resolved = resolved.replacingOccurrences(of: "$PATH", with: expandedPath)
+    resolved = resolved.replacingOccurrences(of: "${PATH}", with: expandedPath)
+    resolved = resolved.replacingOccurrences(of: "$NAME", with: name)
+    resolved = resolved.replacingOccurrences(of: "${NAME}", with: name)
+    resolved = resolved.replacingOccurrences(of: "$PROFILE", with: resolvedProfile)
+    resolved = resolved.replacingOccurrences(of: "${PROFILE}", with: resolvedProfile)
+    resolved = resolved.replacingOccurrences(of: "$LABEL", with: resolvedProfile)
+    resolved = resolved.replacingOccurrences(of: "${LABEL}", with: resolvedProfile)
+    return resolved
   }
 
   func resolvedLaunchRequest(path: String?, name: String) -> WorkspaceLaunchRequest {
     WorkspaceLaunchRequest(
-      type: type,
-      command: resolvedCommand(path: path, name: name),
+      steps: steps.map { step in
+        switch step.action {
+        case .shell(let command):
+          return .shell(resolvedValue(command, path: path, name: name))
+        case .appleScript(let source):
+          return .appleScript(resolvedValue(source, path: path, name: name))
+        case .openApplication(let applicationName):
+          return .openApplication(resolvedValue(applicationName, path: path, name: name))
+        case .launchServices(let configuration):
+          return .launchServices(
+            WorkspaceLaunchServicesConfiguration(
+              target: resolvedValue(configuration.target, path: path, name: name),
+              arguments: configuration.arguments.map {
+                resolvedValue($0, path: path, name: name)
+              },
+              environment: configuration.environment.map {
+                WorkspaceEnvironmentVariable(
+                  id: $0.id,
+                  name: $0.name,
+                  value: resolvedValue($0.value, path: path, name: name))
+              },
+              createsNewApplicationInstance: configuration.createsNewApplicationInstance))
+        }
+      },
       bundleID: bundleID)
   }
 }

@@ -214,7 +214,15 @@ struct WorkspaceRestorerTests {
       clickDesktop: { _ in },
       executeLauncher: { request in
         #expect(currentSpaceID == targetID)
-        launches.append(request.command)
+        guard let step = request.steps.first else { return }
+        switch step {
+        case .openApplication(let applicationName):
+          launches.append(applicationName)
+        case .appleScript(let source):
+          launches.append(source)
+        default:
+          Issue.record("Unexpected launcher action")
+        }
       },
       relocateFocusedWindow: { bundleID, target, _, allowsExistingWindow in
         relocations.append((bundleID, target))
@@ -293,9 +301,75 @@ struct WorkspaceRestorerTests {
       ],
       defaultNames: ["My Work"])
 
-    #expect(capturedRequest?.type == .launchServices)
-    #expect(capturedRequest?.command == NSString(string: "~/Projects/example").expandingTildeInPath)
+    guard case .launchServices(let configuration) = capturedRequest?.steps.first else {
+      Issue.record("Expected a Launch Services step")
+      return
+    }
+    #expect(
+      configuration.target == NSString(string: "~/Projects/example").expandingTildeInPath)
     #expect(capturedRequest?.bundleID == "com.jetbrains.intellij")
+  }
+
+  @Test("Workspace variables resolve throughout every composed step")
+  func composedLauncherVariablesAreResolved() throws {
+    let target = space(id: 101, uuid: "space-composed")
+    let names = makeNameStore([target.uuid: "My Work"])
+    var capturedRequest: WorkspaceLaunchRequest?
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 },
+      allSpaces: { [target] },
+      windowsBySpace: { [:] },
+      switchToSpace: { _ in },
+      clickDesktop: { _ in },
+      executeLauncher: { capturedRequest = $0 },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: names,
+      windowLayoutRestorer: nil,
+      hooks: hooks)
+
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "workspace-1", name: "My Work", path: "~/Projects/example",
+          launchers: [
+            LauncherData(
+              label: "Profile $NAME",
+              steps: [
+                WorkspaceLauncherStep(
+                  action: .launchServices(
+                    WorkspaceLaunchServicesConfiguration(
+                      target: "$PATH",
+                      arguments: ["--workspace", "${NAME}"],
+                      environment: [
+                        WorkspaceEnvironmentVariable(name: "ROOT", value: "${PATH}")
+                      ],
+                      createsNewApplicationInstance: true))),
+                WorkspaceLauncherStep(
+                  action: .appleScript("open profile $PROFILE for $NAME")),
+              ],
+              appName: "Configured App", bundleID: "com.example.Configured")
+          ])
+      ],
+      defaultNames: ["My Work"])
+
+    let expandedPath = NSString(string: "~/Projects/example").expandingTildeInPath
+    guard let steps = capturedRequest?.steps, steps.count == 2 else {
+      Issue.record("Expected both composed launcher steps")
+      return
+    }
+    guard case .launchServices(let launch) = steps[0],
+      case .appleScript(let script) = steps[1]
+    else {
+      Issue.record("Expected Launch Services followed by AppleScript")
+      return
+    }
+    #expect(launch.target == expandedPath)
+    #expect(launch.arguments == ["--workspace", "My Work"])
+    #expect(launch.environment.first?.value == expandedPath)
+    #expect(launch.createsNewApplicationInstance)
+    #expect(script == "open profile Profile My Work for My Work")
   }
 
   @Test("New-window launchers never relocate a pre-existing window")
@@ -487,8 +561,7 @@ struct WorkspaceRestorerTests {
     do {
       try WorkspaceLauncherExecutor.live.execute(
         WorkspaceLaunchRequest(
-          type: .applescript,
-          command: "error \"cold launch failed\" number 42",
+          steps: [.appleScript("error \"cold launch failed\" number 42")],
           bundleID: ""))
       Issue.record("Expected the failing AppleScript launcher to throw")
     } catch {

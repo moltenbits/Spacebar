@@ -1,26 +1,24 @@
 import AppKit
 import Foundation
 
-public enum WorkspaceLaunchType: String, Codable, CaseIterable, Identifiable, Sendable {
-  case shell
-  case applescript
-  case open
-  case launchServices
-
-  public var id: String { rawValue }
+struct WorkspaceLaunchRequest: Equatable {
+  let steps: [WorkspaceLauncherAction]
+  let bundleID: String
 }
 
-struct WorkspaceLaunchRequest: Equatable {
-  let type: WorkspaceLaunchType
-  let command: String
+struct WorkspaceLaunchServicesRequest: Equatable {
   let bundleID: String
+  let target: URL?
+  let arguments: [String]
+  let environment: [String: String]
+  let createsNewApplicationInstance: Bool
 }
 
 /// Owns every workspace launcher execution path. `WorkspaceRestorer` decides
 /// when to launch; this type decides how each configured launch mechanism runs.
 struct WorkspaceLauncherExecutor {
   typealias ProcessRunner = (URL, [String], Bool) throws -> Void
-  typealias LaunchServicesOpener = (String, URL?) throws -> Void
+  typealias LaunchServicesOpener = (WorkspaceLaunchServicesRequest) throws -> Void
 
   static let live = WorkspaceLauncherExecutor(
     runProcess: runProcess,
@@ -30,25 +28,38 @@ struct WorkspaceLauncherExecutor {
   let openWithLaunchServices: LaunchServicesOpener
 
   func execute(_ request: WorkspaceLaunchRequest) throws {
-    switch request.type {
-    case .shell:
-      try runProcess(
-        URL(fileURLWithPath: "/bin/zsh"), ["-c", request.command], false)
-    case .applescript:
-      if !request.bundleID.isEmpty {
-        try openWithLaunchServices(request.bundleID, nil)
+    guard !request.steps.isEmpty else {
+      throw WorkspaceLauncherError.emptyComposition
+    }
+    for step in request.steps {
+      switch step {
+      case .shell(let command):
+        try runProcess(
+          URL(fileURLWithPath: "/bin/zsh"), ["-c", command], false)
+      case .appleScript(let source):
+        try runProcess(
+          URL(fileURLWithPath: "/usr/bin/osascript"), ["-e", source], true)
+      case .openApplication(let applicationName):
+        try runProcess(
+          URL(fileURLWithPath: "/usr/bin/open"), ["-a", applicationName], true)
+      case .launchServices(let configuration):
+        guard !request.bundleID.isEmpty else {
+          throw WorkspaceLauncherError.missingLaunchServicesBundleID
+        }
+        var environment: [String: String] = [:]
+        for variable in configuration.environment {
+          let name = variable.name.trimmingCharacters(in: .whitespacesAndNewlines)
+          guard !name.isEmpty else { continue }
+          environment[name] = variable.value
+        }
+        try openWithLaunchServices(
+          WorkspaceLaunchServicesRequest(
+            bundleID: request.bundleID,
+            target: Self.launchServicesTarget(from: configuration.target),
+            arguments: configuration.arguments,
+            environment: environment,
+            createsNewApplicationInstance: configuration.createsNewApplicationInstance))
       }
-      try runProcess(
-        URL(fileURLWithPath: "/usr/bin/osascript"), ["-e", request.command], true)
-    case .open:
-      try runProcess(
-        URL(fileURLWithPath: "/usr/bin/open"), ["-a", request.command], true)
-    case .launchServices:
-      guard !request.bundleID.isEmpty else {
-        throw WorkspaceLauncherError.missingLaunchServicesBundleID
-      }
-      try openWithLaunchServices(
-        request.bundleID, Self.launchServicesTarget(from: request.command))
     }
   }
 
@@ -62,6 +73,22 @@ struct WorkspaceLauncherExecutor {
 
     let path = (target as NSString).expandingTildeInPath
     return URL(fileURLWithPath: path).standardizedFileURL
+  }
+
+  static func openConfiguration(
+    for request: WorkspaceLaunchServicesRequest
+  ) -> NSWorkspace.OpenConfiguration {
+    let configuration = NSWorkspace.OpenConfiguration()
+    if !request.arguments.isEmpty {
+      configuration.arguments = request.arguments
+    }
+    if !request.environment.isEmpty {
+      configuration.environment = request.environment
+    }
+    if request.createsNewApplicationInstance {
+      configuration.createsNewApplicationInstance = true
+    }
+    return configuration
   }
 
   private static func runProcess(
@@ -101,14 +128,15 @@ struct WorkspaceLauncherExecutor {
 }
 
 private enum LaunchServicesWorkspaceOpener {
-  static func open(bundleID: String, target: URL?) throws {
+  static func open(_ request: WorkspaceLaunchServicesRequest) throws {
     let workspace = NSWorkspace.shared
-    guard let applicationURL = workspace.urlForApplication(withBundleIdentifier: bundleID) else {
-      throw WorkspaceLauncherError.applicationNotFound(bundleID)
+    guard
+      let applicationURL = workspace.urlForApplication(withBundleIdentifier: request.bundleID)
+    else {
+      throw WorkspaceLauncherError.applicationNotFound(request.bundleID)
     }
 
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = true
+    let configuration = WorkspaceLauncherExecutor.openConfiguration(for: request)
     let completion = LaunchServicesCompletion()
     let semaphore = DispatchSemaphore(value: 0)
     let handler: @Sendable (NSRunningApplication?, Error?) -> Void = { _, error in
@@ -116,7 +144,7 @@ private enum LaunchServicesWorkspaceOpener {
       semaphore.signal()
     }
 
-    if let target {
+    if let target = request.target {
       workspace.open(
         [target],
         withApplicationAt: applicationURL,
@@ -130,7 +158,7 @@ private enum LaunchServicesWorkspaceOpener {
     }
 
     guard semaphore.wait(timeout: .now() + 30) == .success else {
-      throw WorkspaceLauncherError.launchServicesTimedOut(bundleID)
+      throw WorkspaceLauncherError.launchServicesTimedOut(request.bundleID)
     }
     if let error = completion.error {
       throw error
@@ -139,6 +167,7 @@ private enum LaunchServicesWorkspaceOpener {
 }
 
 enum WorkspaceLauncherError: Error, LocalizedError {
+  case emptyComposition
   case missingLaunchServicesBundleID
   case applicationNotFound(String)
   case launchServicesTimedOut(String)
@@ -146,6 +175,8 @@ enum WorkspaceLauncherError: Error, LocalizedError {
 
   var errorDescription: String? {
     switch self {
+    case .emptyComposition:
+      return "Workspace launcher has no configured steps"
     case .missingLaunchServicesBundleID:
       return "Launch Services launchers require a bundle ID"
     case .applicationNotFound(let bundleID):
