@@ -520,7 +520,8 @@ public struct LauncherData {
                   name: $0.name,
                   value: resolvedValue($0.value, path: path, name: name))
               },
-              createsNewApplicationInstance: configuration.createsNewApplicationInstance))
+              createsNewApplicationInstance: configuration.createsNewApplicationInstance,
+              activates: configuration.activates))
         }
       },
       bundleID: bundleID)

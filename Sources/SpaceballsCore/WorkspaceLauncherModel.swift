@@ -37,17 +37,20 @@ public struct WorkspaceLaunchServicesConfiguration: Codable, Equatable, Sendable
   public var arguments: [String]
   public var environment: [WorkspaceEnvironmentVariable]
   public var createsNewApplicationInstance: Bool
+  public var activates: Bool
 
   public init(
     target: String = "",
     arguments: [String] = [],
     environment: [WorkspaceEnvironmentVariable] = [],
-    createsNewApplicationInstance: Bool = false
+    createsNewApplicationInstance: Bool = false,
+    activates: Bool = true
   ) {
     self.target = target
     self.arguments = arguments
     self.environment = environment
     self.createsNewApplicationInstance = createsNewApplicationInstance
+    self.activates = activates
   }
 
   public init(from decoder: Decoder) throws {
@@ -59,10 +62,11 @@ public struct WorkspaceLaunchServicesConfiguration: Codable, Equatable, Sendable
       ?? []
     createsNewApplicationInstance =
       try container.decodeIfPresent(Bool.self, forKey: .createsNewApplicationInstance) ?? false
+    activates = try container.decodeIfPresent(Bool.self, forKey: .activates) ?? true
   }
 
   private enum CodingKeys: String, CodingKey {
-    case target, arguments, environment, createsNewApplicationInstance
+    case target, arguments, environment, createsNewApplicationInstance, activates
   }
 }
 
@@ -110,7 +114,8 @@ public enum WorkspaceLauncherAction: Equatable, Sendable {
           environment: configuration.environment.map {
             WorkspaceEnvironmentVariable(name: $0.name, value: $0.value)
           },
-          createsNewApplicationInstance: configuration.createsNewApplicationInstance))
+          createsNewApplicationInstance: configuration.createsNewApplicationInstance,
+          activates: configuration.activates))
     }
   }
 }

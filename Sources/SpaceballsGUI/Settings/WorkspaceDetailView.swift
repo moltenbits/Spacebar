@@ -269,7 +269,8 @@ struct LauncherDetailView: View {
 
               LauncherStepEditor(
                 step: $settings.workspaces[workspaceIndex].launchers[launcherIndex].steps[
-                  stepIndex]
+                  stepIndex],
+                bundleID: launcher.bundleID
               )
             }
             .padding(12)
@@ -314,11 +315,13 @@ struct LauncherDetailView: View {
 
 private struct LauncherStepEditor: View {
   @Binding var step: WorkspaceLauncherStep
+  let bundleID: String
 
   var body: some View {
     switch step.action {
     case .launchServices:
-      LaunchServicesStepEditor(configuration: launchServicesConfiguration)
+      LaunchServicesStepEditor(
+        configuration: launchServicesConfiguration, bundleID: bundleID)
     case .appleScript:
       commandEditor(
         title: "Script", text: stringValue(for: .applescript), minimumHeight: 140)
@@ -382,9 +385,19 @@ private struct LauncherStepEditor: View {
 
 private struct LaunchServicesStepEditor: View {
   @Binding var configuration: WorkspaceLaunchServicesConfiguration
+  let bundleID: String
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
+      if bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        Label(
+          "Enter a bundle ID above before using this Launch Services step.",
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.caption)
+        .foregroundStyle(.orange)
+      }
+
       VStack(alignment: .leading, spacing: 4) {
         Text("Path or URL").font(.caption).foregroundStyle(.secondary)
         TextField("Optional — $PATH opens the workspace project", text: $configuration.target)
@@ -396,6 +409,8 @@ private struct LaunchServicesStepEditor: View {
 
       Toggle(
         "Create a new application instance", isOn: $configuration.createsNewApplicationInstance)
+
+      Toggle("Activate application", isOn: $configuration.activates)
 
       VStack(alignment: .leading, spacing: 4) {
         Text("Arguments").font(.caption).foregroundStyle(.secondary)

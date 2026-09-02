@@ -12,6 +12,7 @@ struct WorkspaceLaunchServicesRequest: Equatable {
   let arguments: [String]
   let environment: [String: String]
   let createsNewApplicationInstance: Bool
+  let activates: Bool
 }
 
 /// Owns every workspace launcher execution path. `WorkspaceRestorer` decides
@@ -56,9 +57,10 @@ struct WorkspaceLauncherExecutor {
           WorkspaceLaunchServicesRequest(
             bundleID: request.bundleID,
             target: Self.launchServicesTarget(from: configuration.target),
-            arguments: configuration.arguments,
+            arguments: configuration.arguments.filter { !$0.isEmpty },
             environment: environment,
-            createsNewApplicationInstance: configuration.createsNewApplicationInstance))
+            createsNewApplicationInstance: configuration.createsNewApplicationInstance,
+            activates: configuration.activates))
       }
     }
   }
@@ -88,6 +90,7 @@ struct WorkspaceLauncherExecutor {
     if request.createsNewApplicationInstance {
       configuration.createsNewApplicationInstance = true
     }
+    configuration.activates = request.activates
     return configuration
   }
 
@@ -139,8 +142,8 @@ private enum LaunchServicesWorkspaceOpener {
     let configuration = WorkspaceLauncherExecutor.openConfiguration(for: request)
     let completion = LaunchServicesCompletion()
     let semaphore = DispatchSemaphore(value: 0)
-    let handler: @Sendable (NSRunningApplication?, Error?) -> Void = { _, error in
-      completion.finish(error: error)
+    let handler: @Sendable (NSRunningApplication?, Error?) -> Void = { application, error in
+      completion.finish(application: application, error: error)
       semaphore.signal()
     }
 
@@ -162,6 +165,27 @@ private enum LaunchServicesWorkspaceOpener {
     }
     if let error = completion.error {
       throw error
+    }
+    guard let application = completion.application else { return }
+    awaitFinishedLaunching(pid: application.processIdentifier)
+  }
+
+  /// Later steps (AppleScript, GUI scripting) need a fully launched app, so
+  /// wait — bounded — for `isFinishedLaunching`. An `NSRunningApplication`'s
+  /// properties only refresh when the MAIN run loop turns, and the CLI
+  /// restore blocks its main thread, so the instance from the completion
+  /// handler would read `false` forever there; poll a fresh instance by pid
+  /// instead. The launch itself already succeeded, so a slow starter that
+  /// outlives the deadline is not an error — the next step simply runs.
+  private static let readinessTimeout: TimeInterval = 5
+  private static let readinessPollInterval: TimeInterval = 0.05
+
+  private static func awaitFinishedLaunching(pid: pid_t) {
+    let deadline = ProcessInfo.processInfo.systemUptime + readinessTimeout
+    while ProcessInfo.processInfo.systemUptime < deadline {
+      guard let fresh = NSRunningApplication(processIdentifier: pid) else { return }
+      if fresh.isFinishedLaunching { return }
+      Thread.sleep(forTimeInterval: readinessPollInterval)
     }
   }
 }
@@ -192,7 +216,14 @@ enum WorkspaceLauncherError: Error, LocalizedError {
 
 private final class LaunchServicesCompletion: @unchecked Sendable {
   private let lock = NSLock()
+  private var storedApplication: NSRunningApplication?
   private var storedError: Error?
+
+  var application: NSRunningApplication? {
+    lock.lock()
+    defer { lock.unlock() }
+    return storedApplication
+  }
 
   var error: Error? {
     lock.lock()
@@ -200,8 +231,9 @@ private final class LaunchServicesCompletion: @unchecked Sendable {
     return storedError
   }
 
-  func finish(error: Error?) {
+  func finish(application: NSRunningApplication?, error: Error?) {
     lock.lock()
+    storedApplication = application
     storedError = error
     lock.unlock()
   }

@@ -345,7 +345,8 @@ struct WorkspaceRestorerTests {
                       environment: [
                         WorkspaceEnvironmentVariable(name: "ROOT", value: "${PATH}")
                       ],
-                      createsNewApplicationInstance: true))),
+                      createsNewApplicationInstance: true,
+                      activates: false))),
                 WorkspaceLauncherStep(
                   action: .appleScript("open profile $PROFILE for $NAME")),
               ],
@@ -369,6 +370,7 @@ struct WorkspaceRestorerTests {
     #expect(launch.arguments == ["--workspace", "My Work"])
     #expect(launch.environment.first?.value == expandedPath)
     #expect(launch.createsNewApplicationInstance)
+    #expect(!launch.activates)
     #expect(script == "open profile Profile My Work for My Work")
   }
 

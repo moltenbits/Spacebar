@@ -23,6 +23,7 @@ struct WorkspaceConfigTests {
       return
     }
     #expect(launch.target.isEmpty)
+    #expect(!launch.activates)
     #expect(script.contains("create window with default profile"))
   }
 
@@ -41,7 +42,8 @@ struct WorkspaceConfigTests {
               environment: [
                 WorkspaceEnvironmentVariable(name: "PROJECT_ROOT", value: "$PATH")
               ],
-              createsNewApplicationInstance: true))),
+              createsNewApplicationInstance: true,
+              activates: false))),
         WorkspaceLauncherStep(
           action: .appleScript("tell application \"Configured App\" to activate")),
       ])
@@ -50,6 +52,24 @@ struct WorkspaceConfigTests {
       AppLauncher.self, from: JSONEncoder().encode(original))
 
     #expect(decoded == original)
+  }
+
+  @Test("Launch Services configurations decoded without activation preserve the old default")
+  func launchServicesActivationDecodeDefault() throws {
+    let data = Data(
+      """
+      {
+        "target": "$PATH",
+        "arguments": [],
+        "environment": [],
+        "createsNewApplicationInstance": false
+      }
+      """.utf8)
+
+    let configuration = try JSONDecoder().decode(
+      WorkspaceLaunchServicesConfiguration.self, from: data)
+
+    #expect(configuration.activates)
   }
 
   @Test("Legacy launchers infer known bundle IDs from their app names")
@@ -85,13 +105,33 @@ struct WorkspaceConfigTests {
       return
     }
     #expect(intelliJConfiguration.target == "$PATH")
+    #expect(intelliJConfiguration.activates)
 
     #expect(LauncherTemplate.tower.launcher.bundleID == "com.fournova.Tower3")
     #expect(LauncherTemplate.tower.launcher.steps.map(\.type) == [.launchServices])
+    guard
+      case .launchServices(let towerConfiguration) =
+        LauncherTemplate.tower.launcher.steps[0].action
+    else {
+      Issue.record("Expected the Tower Launch Services configuration")
+      return
+    }
+    #expect(towerConfiguration.activates)
 
     #expect(LauncherTemplate.safari.launcher.bundleID == "com.apple.Safari")
 
     #expect(LauncherTemplate.safariProfile.launcher.bundleID == "com.apple.Safari")
+    guard
+      case .launchServices(let safariConfiguration) =
+        LauncherTemplate.safari.launcher.steps[0].action,
+      case .launchServices(let safariProfileConfiguration) =
+        LauncherTemplate.safariProfile.launcher.steps[0].action
+    else {
+      Issue.record("Expected the Safari Launch Services configurations")
+      return
+    }
+    #expect(!safariConfiguration.activates)
+    #expect(!safariProfileConfiguration.activates)
     #expect(LauncherTemplate.genericOpen.launcher.bundleID.isEmpty)
     #expect(LauncherTemplate.genericShell.launcher.bundleID.isEmpty)
     #expect(LauncherTemplate.genericAppleScript.launcher.steps.map(\.type) == [.applescript])
@@ -99,6 +139,14 @@ struct WorkspaceConfigTests {
     #expect(
       LauncherTemplate.genericLaunchServices.launcher.steps.map(\.type) == [.launchServices])
     #expect(LauncherTemplate.genericLaunchServices.launcher.bundleID.isEmpty)
+    guard
+      case .launchServices(let genericConfiguration) =
+        LauncherTemplate.genericLaunchServices.launcher.steps[0].action
+    else {
+      Issue.record("Expected the generic Launch Services configuration")
+      return
+    }
+    #expect(genericConfiguration.activates)
   }
 
   @Test("Legacy stock iTerm launchers migrate to an explicit composed pipeline")
@@ -117,10 +165,13 @@ struct WorkspaceConfigTests {
         """)
 
     #expect(migrated.steps.map(\.type) == [.launchServices, .applescript])
-    guard case .appleScript(let script) = migrated.steps[1].action else {
+    guard case .launchServices(let configuration) = migrated.steps[0].action,
+      case .appleScript(let script) = migrated.steps[1].action
+    else {
       Issue.record("Expected the migrated iTerm configuration step")
       return
     }
+    #expect(!configuration.activates)
     #expect(!script.contains("do shell script"))
     #expect(script.contains("create window with default profile"))
   }
@@ -142,10 +193,13 @@ struct WorkspaceConfigTests {
         """)
 
     #expect(migrated.steps.map(\.type) == [.launchServices, .applescript])
-    guard case .appleScript(let script) = migrated.steps[1].action else {
+    guard case .launchServices(let configuration) = migrated.steps[0].action,
+      case .appleScript(let script) = migrated.steps[1].action
+    else {
       Issue.record("Expected the migrated iTerm AppleScript")
       return
     }
+    #expect(!configuration.activates)
     #expect(!script.contains("do shell script"))
     #expect(script.contains("create window with default profile"))
   }
@@ -179,11 +233,15 @@ struct WorkspaceConfigTests {
 
     #expect(migratedIntelliJ.steps.map(\.type) == [.launchServices])
     #expect(migratedTower.steps.map(\.type) == [.launchServices])
-    guard case .launchServices(let configuration) = migratedIntelliJ.steps[0].action else {
+    guard case .launchServices(let configuration) = migratedIntelliJ.steps[0].action,
+      case .launchServices(let towerConfiguration) = migratedTower.steps[0].action
+    else {
       Issue.record("Expected migrated IntelliJ Launch Services configuration")
       return
     }
     #expect(configuration.target == "$PATH")
+    #expect(configuration.activates)
+    #expect(towerConfiguration.activates)
   }
 
   @Test("Custom project shell launchers are not migrated")
@@ -240,12 +298,19 @@ struct WorkspaceConfigTests {
     #expect(migratedSafari.steps.map(\.type) == [.launchServices, .applescript])
     #expect(migratedSafariProfile.steps.map(\.type) == [.launchServices, .applescript])
     #expect(migratedCurrentSafari.steps.map(\.type) == [.launchServices, .applescript])
-    guard case .appleScript(let safariScript) = migratedSafari.steps[1].action,
+    guard case .launchServices(let safariConfiguration) = migratedSafari.steps[0].action,
+      case .launchServices(let profileConfiguration) = migratedSafariProfile.steps[0].action,
+      case .launchServices(let currentSafariConfiguration) =
+        migratedCurrentSafari.steps[0].action,
+      case .appleScript(let safariScript) = migratedSafari.steps[1].action,
       case .appleScript(let profileScript) = migratedSafariProfile.steps[1].action
     else {
       Issue.record("Expected migrated Safari AppleScript steps")
       return
     }
+    #expect(!safariConfiguration.activates)
+    #expect(!profileConfiguration.activates)
+    #expect(!currentSafariConfiguration.activates)
     #expect(!safariScript.contains("do shell script"))
     #expect(safariScript.contains("New Window"))
     #expect(!profileScript.contains("do shell script"))

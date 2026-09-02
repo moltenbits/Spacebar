@@ -51,7 +51,8 @@ struct WorkspaceLauncherExecutorTests {
                 WorkspaceEnvironmentVariable(name: "", value: "ignored"),
                 WorkspaceEnvironmentVariable(name: "EMPTY_KEY_IS_IGNORED", value: "last"),
               ],
-              createsNewApplicationInstance: true))
+              createsNewApplicationInstance: true,
+              activates: false))
         ],
         bundleID: "com.example.Editor"))
 
@@ -67,6 +68,7 @@ struct WorkspaceLauncherExecutorTests {
         "PROJECT": "/Users/example/Project", "EMPTY_KEY_IS_IGNORED": "last",
       ])
     #expect(captured.createsNewApplicationInstance)
+    #expect(!captured.activates)
 
     let openConfiguration = WorkspaceLauncherExecutor.openConfiguration(for: captured)
     #expect(openConfiguration.arguments == ["--line", "42"])
@@ -75,6 +77,47 @@ struct WorkspaceLauncherExecutorTests {
         "PROJECT": "/Users/example/Project", "EMPTY_KEY_IS_IGNORED": "last",
       ])
     #expect(openConfiguration.createsNewApplicationInstance)
+    #expect(!openConfiguration.activates)
+  }
+
+  @Test("Launch Services preserves activating open configurations")
+  func activatingLaunchServicesConfiguration() throws {
+    var captured: WorkspaceLaunchServicesRequest?
+    let executor = WorkspaceLauncherExecutor(
+      runProcess: { _, _, _ in },
+      openWithLaunchServices: { captured = $0 })
+
+    try executor.execute(
+      WorkspaceLaunchRequest(
+        steps: [
+          .launchServices(WorkspaceLaunchServicesConfiguration(activates: true))
+        ],
+        bundleID: "com.example.Editor"))
+
+    guard let captured else {
+      Issue.record("Expected the Launch Services request")
+      return
+    }
+    #expect(captured.activates)
+    #expect(WorkspaceLauncherExecutor.openConfiguration(for: captured).activates)
+  }
+
+  @Test("Launch Services drops empty arguments before opening the application")
+  func launchServicesDropsEmptyArguments() throws {
+    var captured: WorkspaceLaunchServicesRequest?
+    let executor = WorkspaceLauncherExecutor(
+      runProcess: { _, _, _ in },
+      openWithLaunchServices: { captured = $0 })
+
+    try executor.execute(
+      WorkspaceLaunchRequest(
+        steps: [
+          .launchServices(
+            WorkspaceLaunchServicesConfiguration(arguments: ["--workspace", "", "project", ""]))
+        ],
+        bundleID: "com.example.Editor"))
+
+    #expect(captured?.arguments == ["--workspace", "project"])
   }
 
   @Test("Launch Services opens a file target with the configured bundle")

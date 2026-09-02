@@ -202,14 +202,17 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
 
   private static func composedSteps(script: String) -> [WorkspaceLauncherStep] {
     [
-      launchServicesStep(),
+      launchServicesStep(activates: false),
       WorkspaceLauncherStep(action: .appleScript(script)),
     ]
   }
 
-  private static func launchServicesStep(target: String = "") -> WorkspaceLauncherStep {
+  private static func launchServicesStep(
+    target: String = "", activates: Bool = true
+  ) -> WorkspaceLauncherStep {
     WorkspaceLauncherStep(
-      action: .launchServices(WorkspaceLaunchServicesConfiguration(target: target)))
+      action: .launchServices(
+        WorkspaceLaunchServicesConfiguration(target: target, activates: activates)))
   }
 
   private static func step(type: LaunchType, command: String) -> WorkspaceLauncherStep {
@@ -289,7 +292,8 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         bundleID: "com.googlecode.iterm2",
         steps: [
           WorkspaceLauncherStep(
-            action: .launchServices(WorkspaceLaunchServicesConfiguration())),
+            action: .launchServices(
+              WorkspaceLaunchServicesConfiguration(activates: false))),
           WorkspaceLauncherStep(action: .appleScript(AppLauncher.iTermCommand)),
         ]
       )
@@ -301,7 +305,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         steps: [
           WorkspaceLauncherStep(
             action: .launchServices(
-              WorkspaceLaunchServicesConfiguration(target: "$PATH")))
+              WorkspaceLaunchServicesConfiguration(target: "$PATH", activates: true)))
         ]
       )
     case .tower:
@@ -312,7 +316,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         steps: [
           WorkspaceLauncherStep(
             action: .launchServices(
-              WorkspaceLaunchServicesConfiguration(target: "$PATH")))
+              WorkspaceLaunchServicesConfiguration(target: "$PATH", activates: true)))
         ]
       )
     case .safari:
@@ -322,7 +326,8 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         bundleID: "com.apple.Safari",
         steps: [
           WorkspaceLauncherStep(
-            action: .launchServices(WorkspaceLaunchServicesConfiguration())),
+            action: .launchServices(
+              WorkspaceLaunchServicesConfiguration(activates: false))),
           WorkspaceLauncherStep(action: .appleScript(AppLauncher.safariCommand)),
         ]
       )
@@ -333,7 +338,8 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         bundleID: "com.apple.Safari",
         steps: [
           WorkspaceLauncherStep(
-            action: .launchServices(WorkspaceLaunchServicesConfiguration())),
+            action: .launchServices(
+              WorkspaceLaunchServicesConfiguration(activates: false))),
           WorkspaceLauncherStep(action: .appleScript(AppLauncher.safariProfileCommand)),
         ]
       )
@@ -348,7 +354,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         steps: [
           WorkspaceLauncherStep(
             action: .launchServices(
-              WorkspaceLaunchServicesConfiguration(target: "$PATH")))
+              WorkspaceLaunchServicesConfiguration(target: "$PATH", activates: true)))
         ]
       )
     case .genericAppleScript:
