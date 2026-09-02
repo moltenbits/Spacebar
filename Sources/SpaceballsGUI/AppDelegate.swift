@@ -950,18 +950,18 @@ extension AppDelegate: KeyInterceptorDelegate {
     }
   }
 
-  /// Arms eject records whose display is currently absent. Auto-restore only
-  /// touches ARMED records — a display must actually go away after the eject
-  /// before its spaces auto-return, so spurious display events (sleep/wake,
-  /// resolution changes) can't undo an eject whose displays never left.
-  /// Runs at launch (records persist across restarts) and on every display
-  /// reconfiguration.
+  /// Arms the origin displays that are currently absent. Auto-restore only
+  /// touches origins on ARMED displays — a display must actually go away
+  /// after the eject before its spaces auto-return, so spurious display
+  /// events (sleep/wake, resolution changes) can't undo an eject whose
+  /// displays never left. Runs at launch (records persist across restarts)
+  /// and on every display reconfiguration.
   private func armEjectionRecords() {
     let pending = ejectStore.pendingEjections()
     guard !pending.isEmpty else { return }
     let connected = Set(viewModel.spaceManager.getAllSpaces().map(\.displayUUID))
-    let absent = pending.filter { !connected.contains($0.value) }.map(\.key)
-    ejectStore.armEjections(spaceUUIDs: absent)
+    let absent = Set(pending.values.flatMap { $0 }).subtracting(connected)
+    ejectStore.armDisplays(absent.sorted())
   }
 
   /// Debounced auto-restore: display reconfiguration fires several times per
@@ -993,12 +993,7 @@ extension AppDelegate: KeyInterceptorDelegate {
       scheduleRestoreCheck(after: 2.0)
       return
     }
-    let armed = ejectStore.armedEjections()
-    let pending = ejectStore.pendingEjections().filter { armed.contains($0.key) }
-    guard !pending.isEmpty else { return }
-
-    let plan = RestorePlanner.plan(
-      spaces: viewModel.spaceManager.getAllSpaces(), pending: pending)
+    let plan = viewModel.spaceManager.restorePlan(ejectStore: ejectStore, onlyArmed: true)
     // Stale/already-home records still need clearing even when nothing
     // moves, but only a real move warrants the HUD and input blocking.
     let hasMoves = !plan.moves.isEmpty
@@ -1012,14 +1007,7 @@ extension AppDelegate: KeyInterceptorDelegate {
   /// while Mission Control's AX hierarchy is still rebuilding, and without a
   /// retry those Spaces sit unrestored until the next display event.
   private func scheduleRetryIfIncomplete() {
-    let armed = ejectStore.armedEjections()
-    let pending = ejectStore.pendingEjections().filter { armed.contains($0.key) }
-    guard !pending.isEmpty else {
-      restoreFailedAttempts = 0
-      return
-    }
-    let plan = RestorePlanner.plan(
-      spaces: viewModel.spaceManager.getAllSpaces(), pending: pending)
+    let plan = viewModel.spaceManager.restorePlan(ejectStore: ejectStore, onlyArmed: true)
     guard !plan.moves.isEmpty else {
       // Only waiting-for-display records remain — a retry can't help them.
       restoreFailedAttempts = 0
@@ -1044,16 +1032,10 @@ extension AppDelegate: KeyInterceptorDelegate {
   /// Shared restore runner for the auto path (armed records only) and the
   /// manual Cmd+Shift+E path (everything movable).
   private func runSpaceRestore(onlyArmed: Bool, showHUD: Bool) {
-    let armed = ejectStore.armedEjections()
-    let hadPending = ejectStore.pendingEjections()
-      .contains { !onlyArmed || armed.contains($0.key) }
+    let plan = viewModel.spaceManager.restorePlan(ejectStore: ejectStore, onlyArmed: onlyArmed)
+    let hadPending = !plan.isEmpty
     spaceEvacuationInFlight = true
     if showHUD {
-      let plan = RestorePlanner.plan(
-        spaces: viewModel.spaceManager.getAllSpaces(),
-        pending: ejectStore.pendingEjections().filter {
-          !onlyArmed || armed.contains($0.key)
-        })
       spaceTransferShield.begin(operation: .restore, plannedMoves: plan.moves.count)
     }
 
