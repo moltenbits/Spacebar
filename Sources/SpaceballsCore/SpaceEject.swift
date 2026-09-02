@@ -50,7 +50,8 @@ public struct EjectSummary {
 public struct SpaceRestoreSummary {
   /// UUIDs of spaces moved back to their recorded display just now.
   public let restored: [String]
-  /// UUIDs still pending because their display remains disconnected.
+  /// UUIDs still parked on the built-in display because none of their
+  /// origin displays is connected.
   public let waiting: [String]
 }
 
@@ -103,7 +104,24 @@ extension SpaceManager {
     }
 
     let verified = executePlannedMoves(preSwitches: plan.preSwitches, moves: plan.moves)
+    // A space keeps one origin per site. This eject supersedes only the
+    // space's origins whose display is connected right now (it plainly
+    // isn't ejected from there anymore); origins whose display is absent say
+    // where the space lives at the other site and survive, so an eject at
+    // home never erases the office layout.
+    let resolver = Self.displayResolver(for: getAllSpaces(), ejectStore: ejectStore)
+    let pending = ejectStore.pendingEjections()
     for move in verified {
+      let superseded = EjectPlanner.supersededOrigins(
+        existing: pending[move.spaceUUID] ?? [], newOrigin: move.sourceDisplayUUID,
+        resolver: resolver)
+      if !superseded.isEmpty {
+        ejectStore.removeOrigins(spaceUUID: move.spaceUUID, displayUUIDs: superseded)
+        Diagnostics.log(
+          "eject",
+          "space \(move.spaceUUID): origin(s) \(superseded.joined(separator: ", ")) "
+            + "superseded by \(move.sourceDisplayUUID)")
+      }
       ejectStore.recordEjection(
         spaceUUID: move.spaceUUID, originalDisplayUUID: move.sourceDisplayUUID)
     }
@@ -131,45 +149,35 @@ extension SpaceManager {
   /// even when their spaces are absent from the current CGS snapshot. No
   /// space is activated.
   ///
-  /// `onlyArmed` restricts the run to records whose display has actually been
-  /// observed absent since the eject — the auto-restore gate. Manual restores
-  /// (CLI, Cmd+Shift+E) pass false and move everything movable.
+  /// `onlyArmed` restricts the run to origins whose display has actually
+  /// been observed absent since the eject — the auto-restore gate. Manual
+  /// restores (CLI, Cmd+Shift+E) pass false and move everything movable.
   public func restoreEjectedSpaces(
     ejectStore: EjectRecordStoring, onlyArmed: Bool = false
   ) throws -> SpaceRestoreSummary {
-    var pending = ejectStore.pendingEjections()
-    if onlyArmed {
-      let armed = ejectStore.armedEjections()
-      pending = pending.filter { armed.contains($0.key) }
-    }
-    guard !pending.isEmpty else { return SpaceRestoreSummary(restored: [], waiting: []) }
+    let plan = restorePlan(ejectStore: ejectStore, onlyArmed: onlyArmed)
+    guard !plan.isEmpty else { return SpaceRestoreSummary(restored: [], waiting: []) }
     guard Self.ensureAccessibilityTrusted() else {
       throw SpaceMoveError.accessibilityNotTrusted
     }
     let token = Diagnostics.beginTiming("eject", "restoreEjectedSpaces")
 
-    let spaces = getAllSpaces()
-    let connectedFingerprints = Dictionary(
-      uniqueKeysWithValues: Set(spaces.map(\.displayUUID)).compactMap { uuid in
-        Self.captureDisplayFingerprint(displayUUID: uuid).map { (uuid, $0) }
-      })
-    let plan = RestorePlanner.plan(
-      spaces: spaces, pending: pending,
-      recordedFingerprints: ejectStore.displayFingerprints(),
-      connectedFingerprints: connectedFingerprints)
     for (recorded, resolved) in plan.displayRemap {
       Diagnostics.log(
         "eject",
         "restore remap: recorded display \(recorded) matched by hardware fingerprint to \(resolved)"
       )
     }
-    for spaceUUID in plan.stale + plan.completed {
-      ejectStore.clearEjection(spaceUUID: spaceUUID)
+    for record in plan.stale + plan.completed {
+      ejectStore.clearEjection(spaceUUID: record.spaceUUID, displayUUID: record.displayUUID)
     }
 
     let restored = executePlannedMoves(preSwitches: plan.preSwitches, moves: plan.moves)
     for move in restored {
-      ejectStore.clearEjection(spaceUUID: move.spaceUUID)
+      // Consume only the origin this move satisfied; the space's origins at
+      // other sites stay on record for when those displays come back.
+      guard let origin = plan.restoredOrigins[move.spaceUUID] else { continue }
+      ejectStore.clearEjection(spaceUUID: move.spaceUUID, displayUUID: origin)
     }
 
     reactivateRecordedActiveSpaces(ejectStore: ejectStore, displayRemap: plan.displayRemap)
@@ -178,6 +186,25 @@ extension SpaceManager {
     Diagnostics.endTiming(
       token, outcome: "restored=\(summary.restored.count) waiting=\(summary.waiting.count)")
     return summary
+  }
+
+  /// The restore plan for the current CGS snapshot — the single place that
+  /// decides what a restore would do, so the GUI's pre-checks (should the
+  /// HUD show, is a retry worthwhile) and the actual run agree, including on
+  /// displays that came back under a new UUID.
+  public func restorePlan(
+    ejectStore: EjectRecordStoring, onlyArmed: Bool = false
+  ) -> RestorePlanner.Plan {
+    var pending = ejectStore.pendingEjections()
+    if onlyArmed {
+      pending = RestorePlanner.armedPending(pending, armedDisplays: ejectStore.armedDisplays())
+    }
+    let spaces = getAllSpaces()
+    return RestorePlanner.plan(
+      spaces: spaces, pending: pending,
+      recordedFingerprints: ejectStore.displayFingerprints(),
+      connectedFingerprints: Self.connectedFingerprints(for: spaces),
+      parkedDisplayUUID: Self.builtinDisplayUUID())
   }
 
   /// Pre-switches displays off the spaces about to move, runs the batch of

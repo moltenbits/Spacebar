@@ -88,6 +88,17 @@ public enum EjectPlanner {
       activeSpaceByDisplay: activeSpaceByDisplay)
   }
 
+  /// Origins of `existing` that a fresh eject from `newOrigin` supersedes:
+  /// those whose display is connected right now — the space plainly isn't
+  /// ejected from there anymore. Origins whose display is absent belong to
+  /// another site (the home monitor while at the office, and vice versa) and
+  /// survive; the new origin itself is never superseded.
+  public static func supersededOrigins(
+    existing: [String], newOrigin: String, resolver: DisplayResolver
+  ) -> [String] {
+    existing.filter { $0 != newOrigin && resolver.resolve($0) != nil }
+  }
+
   /// Desktop spaces grouped per display, preserving CGS enumeration order
   /// (which matches the Mission Control bar's tile order) for both the
   /// displays and the spaces within each.
@@ -102,69 +113,115 @@ public enum EjectPlanner {
   }
 }
 
+/// One eject record: a space and a display it was ejected from.
+public struct EjectRecord: Equatable, Hashable {
+  public let spaceUUID: String
+  public let displayUUID: String
+
+  public init(spaceUUID: String, displayUUID: String) {
+    self.spaceUUID = spaceUUID
+    self.displayUUID = displayUUID
+  }
+}
+
 /// Plans sending ejected spaces back to their recorded displays once those
-/// displays are connected again.
+/// displays are connected again. A space may carry several origins (one per
+/// site it was ejected at); the most recently recorded origin whose display
+/// is connected wins, and only that origin is consumed by the restore.
 public enum RestorePlanner {
 
   public struct Plan: Equatable {
     public let preSwitches: [EjectPlanner.PreSwitch]
     public let moves: [EjectPlanner.Move]
-    /// Records whose space is already on its (resolved) home display — clear them.
-    public let completed: [String]
-    /// Records whose resolved home display is connected but whose space no
+    /// Origins whose space already sits on the (resolved) display — clear them.
+    public let completed: [EjectRecord]
+    /// Origins whose resolved display is connected but whose space no
     /// longer exists — clear them.
-    public let stale: [String]
-    /// Records whose display is still disconnected — keep them.
+    public let stale: [EjectRecord]
+    /// Spaces still parked because none of their origin displays is
+    /// connected — keep their records.
     public let waiting: [String]
+    /// The recorded origin each move satisfies (space UUID → recorded
+    /// display UUID, i.e. the key to clear once the move verifies — NOT the
+    /// remapped target).
+    public let restoredOrigins: [String: String]
     /// Recorded display UUIDs that were resolved to a DIFFERENT connected
     /// UUID by hardware fingerprint — macOS reassigned the display's UUID
     /// across the reconnect (recorded UUID → connected UUID).
     public let displayRemap: [String: String]
+
+    public var isEmpty: Bool {
+      moves.isEmpty && completed.isEmpty && stale.isEmpty && waiting.isEmpty
+    }
+  }
+
+  /// Keeps only origins on armed displays — the auto-restore gate.
+  public static func armedPending(
+    _ pending: [String: [String]], armedDisplays: Set<String>
+  ) -> [String: [String]] {
+    pending.compactMapValues { origins in
+      let armed = origins.filter { armedDisplays.contains($0) }
+      return armed.isEmpty ? nil : armed
+    }
   }
 
   /// `recordedFingerprints`/`connectedFingerprints` let a record whose exact
   /// display UUID never returned resolve to the same physical display under
   /// its new UUID. With them empty, only exact UUID matches restore —
   /// legacy records keep their old semantics.
+  ///
+  /// `parkedDisplayUUID` is the eject target (the built-in display). With it
+  /// given, a space whose origins are all absent counts as `waiting` only
+  /// while it is still parked there (or gone from the snapshot): a space that
+  /// sits on some other display has been placed at this site, and its
+  /// remaining origins describe another site.
   public static func plan(
-    spaces: [SpaceInfo], pending: [String: String],
+    spaces: [SpaceInfo], pending: [String: [String]],
     recordedFingerprints: [String: DisplayFingerprint] = [:],
-    connectedFingerprints: [String: DisplayFingerprint] = [:]
+    connectedFingerprints: [String: DisplayFingerprint] = [:],
+    parkedDisplayUUID: String? = nil
   ) -> Plan {
-    let connectedDisplays = Set(spaces.map(\.displayUUID))
+    let resolver = DisplayResolver(
+      connectedDisplays: Set(spaces.map(\.displayUUID)),
+      recordedFingerprints: recordedFingerprints,
+      connectedFingerprints: connectedFingerprints)
     let spaceByUUID = Dictionary(
       spaces.map { ($0.uuid, $0) }, uniquingKeysWith: { first, _ in first })
 
     var displayRemap: [String: String] = [:]
-    func resolveDisplay(_ recorded: String) -> String? {
-      if connectedDisplays.contains(recorded) { return recorded }
-      if let cached = displayRemap[recorded] { return cached }
-      guard let fingerprint = recordedFingerprints[recorded],
-        let matched = DisplayFingerprint.match(
-          recorded: fingerprint, connected: connectedFingerprints),
-        connectedDisplays.contains(matched)
-      else { return nil }
-      displayRemap[recorded] = matched
-      return matched
-    }
-
     var restorable: [String: String] = [:]
-    var completed: [String] = []
-    var stale: [String] = []
+    var restoredOrigins: [String: String] = [:]
+    var completed: [EjectRecord] = []
+    var stale: [EjectRecord] = []
     var waiting: [String] = []
-    for (spaceUUID, displayUUID) in pending {
-      guard let resolved = resolveDisplay(displayUUID) else {
+    for (spaceUUID, origins) in pending {
+      // Most recent origin first: when several sites' displays are connected
+      // at once, the latest eject describes where the space belongs.
+      var connectedOrigin: (recorded: String, resolved: String)?
+      for origin in origins.reversed() {
+        guard let resolved = resolver.resolve(origin) else { continue }
+        if resolved != origin { displayRemap[origin] = resolved }
+        connectedOrigin = (origin, resolved)
+        break
+      }
+      let space = spaceByUUID[spaceUUID]
+      guard let connectedOrigin else {
+        if let parkedDisplayUUID, let space, space.displayUUID != parkedDisplayUUID {
+          continue
+        }
         waiting.append(spaceUUID)
         continue
       }
-      guard let space = spaceByUUID[spaceUUID] else {
-        stale.append(spaceUUID)
+      let record = EjectRecord(spaceUUID: spaceUUID, displayUUID: connectedOrigin.recorded)
+      guard let space else {
+        stale.append(record)
         continue
       }
-      if space.displayUUID == resolved {
-        completed.append(spaceUUID)
+      if space.displayUUID == connectedOrigin.resolved {
+        completed.append(record)
       } else {
-        restorable[spaceUUID] = resolved
+        restorable[spaceUUID] = connectedOrigin.resolved
+        restoredOrigins[spaceUUID] = connectedOrigin.recorded
       }
     }
 
@@ -194,9 +251,13 @@ public enum RestorePlanner {
         })
     }
 
+    let byRecord = { (a: EjectRecord, b: EjectRecord) in
+      (a.spaceUUID, a.displayUUID) < (b.spaceUUID, b.displayUUID)
+    }
     return Plan(
       preSwitches: preSwitches, moves: moves,
-      completed: completed.sorted(), stale: stale.sorted(), waiting: waiting.sorted(),
+      completed: completed.sorted(by: byRecord), stale: stale.sorted(by: byRecord),
+      waiting: waiting.sorted(), restoredOrigins: restoredOrigins,
       displayRemap: displayRemap)
   }
 }

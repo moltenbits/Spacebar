@@ -84,3 +84,53 @@ extension SpaceManager {
       originX: bounds.origin.x, originY: bounds.origin.y)
   }
 }
+
+/// Resolves a recorded display UUID to a currently connected one: the exact
+/// UUID when it is present, otherwise the connected display with the same
+/// hardware fingerprint (macOS can reassign UUIDs across reconnects). Shared
+/// by restore planning and by eject-time origin supersession so both judge
+/// "is this display here" the same way.
+public struct DisplayResolver {
+  public let connectedDisplays: Set<String>
+  public let recordedFingerprints: [String: DisplayFingerprint]
+  public let connectedFingerprints: [String: DisplayFingerprint]
+
+  public init(
+    connectedDisplays: Set<String>,
+    recordedFingerprints: [String: DisplayFingerprint],
+    connectedFingerprints: [String: DisplayFingerprint]
+  ) {
+    self.connectedDisplays = connectedDisplays
+    self.recordedFingerprints = recordedFingerprints
+    self.connectedFingerprints = connectedFingerprints
+  }
+
+  public func resolve(_ recorded: String) -> String? {
+    if connectedDisplays.contains(recorded) { return recorded }
+    guard let fingerprint = recordedFingerprints[recorded],
+      let matched = DisplayFingerprint.match(
+        recorded: fingerprint, connected: connectedFingerprints),
+      connectedDisplays.contains(matched)
+    else { return nil }
+    return matched
+  }
+}
+
+extension SpaceManager {
+  /// Live fingerprints of every display in `spaces`, keyed by display UUID.
+  static func connectedFingerprints(for spaces: [SpaceInfo]) -> [String: DisplayFingerprint] {
+    Dictionary(
+      uniqueKeysWithValues: Set(spaces.map(\.displayUUID)).compactMap { uuid in
+        captureDisplayFingerprint(displayUUID: uuid).map { (uuid, $0) }
+      })
+  }
+
+  static func displayResolver(
+    for spaces: [SpaceInfo], ejectStore: EjectRecordStoring
+  ) -> DisplayResolver {
+    DisplayResolver(
+      connectedDisplays: Set(spaces.map(\.displayUUID)),
+      recordedFingerprints: ejectStore.displayFingerprints(),
+      connectedFingerprints: connectedFingerprints(for: spaces))
+  }
+}
