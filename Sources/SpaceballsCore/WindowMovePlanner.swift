@@ -7,6 +7,8 @@ import Foundation
 /// `WindowMovePlanner.route` from a `getAllSpaces()` snapshot plus the window's
 /// CGS facts, and consumed before any Mission Control work begins.
 public enum WindowMoveRoute: Equatable {
+  /// Membership already satisfies the request. Do not activate or move the window.
+  case alreadyOnTarget
   /// The window's Space and the target Space are both visible right now (each
   /// is current on a different display), so the window can be relocated with a
   /// plain AX position write to `targetFrame` — the same mechanism the resize
@@ -23,7 +25,6 @@ public enum WindowMoveRoute: Equatable {
     case targetNotFound
     case targetNotDesktop
     case targetNotCurrent
-    case windowAlreadyOnTarget
     case stickyWindow
     case sourceUnknown
     case sourceNotFound
@@ -39,7 +40,6 @@ public enum WindowMoveRoute: Equatable {
       case .targetNotFound: return "target-not-found"
       case .targetNotDesktop: return "target-not-desktop"
       case .targetNotCurrent: return "target-not-current"
-      case .windowAlreadyOnTarget: return "window-already-on-target"
       case .stickyWindow: return "sticky-window"
       case .sourceUnknown: return "source-unknown"
       case .sourceNotFound: return "source-not-found"
@@ -85,12 +85,11 @@ public enum WindowMovePlanner {
     guard target.type == .desktop else {
       return .missionControl(reason: .targetNotDesktop)
     }
+    guard !windowSpaceIDs.contains(targetSpaceID) else {
+      return .alreadyOnTarget
+    }
     guard target.isCurrent else {
       return .missionControl(reason: .targetNotCurrent)
-    }
-
-    guard !windowSpaceIDs.contains(targetSpaceID) else {
-      return .missionControl(reason: .windowAlreadyOnTarget)
     }
     // A sticky window ("Assign to All Desktops") is on every Space already;
     // membership verification would pass before anything moved.

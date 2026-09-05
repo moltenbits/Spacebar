@@ -83,11 +83,14 @@ struct WindowMovePlannerEligibilityTests {
     #expect(route(targetSpaceID: 4) == .missionControl(reason: .targetNotCurrent))
   }
 
-  @Test("Window already on the target Space is declined")
+  @Test("Window already on the target Space requires no move")
   func alreadyOnTarget() {
     #expect(
       route(windowSpaceIDs: [3], targetSpaceID: 3)
-        == .missionControl(reason: .windowAlreadyOnTarget))
+        == .alreadyOnTarget)
+    #expect(
+      route(windowSpaceIDs: [4], targetSpaceID: 4, windowBounds: nil, windowIsOnscreen: false)
+        == .alreadyOnTarget)
   }
 
   @Test("Sticky window (multiple Spaces) falls back to Mission Control")

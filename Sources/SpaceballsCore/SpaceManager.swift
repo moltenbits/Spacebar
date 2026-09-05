@@ -2266,7 +2266,7 @@ public class SpaceManager {
   ///   - activateAfterMove: bring the moved window to front afterwards. When
   ///     off, the user's current Spaces and focus are left untouched.
   /// - Throws: `WindowActivationError` if the window can't be found or activated.
-  /// - Returns: `true` if the window was moved.
+  /// - Returns: `true` if the window was moved or was already on the target Space.
   @discardableResult
   public func moveWindowToSpace(
     windowID: Int, targetSpaceID: UInt64, activateAfterMove: Bool = true
@@ -2308,6 +2308,9 @@ public class SpaceManager {
       displayVisibleFrames: displayVisibleFramesProvider())
     var directFallbackReason: String?
     switch route {
+    case .alreadyOnTarget:
+      Diagnostics.endTiming(token, outcome: "already-on-target")
+      return true
     case .direct(let targetFrame):
       guard let rawPID = entry[kCGWindowOwnerPID as String] as? Int else {
         directFallbackReason = "pid-unknown"
@@ -2340,6 +2343,13 @@ public class SpaceManager {
     if let directFallbackReason {
       Diagnostics.log(
         "move-space", "direct-fallback:\(directFallbackReason) — using Mission Control")
+    }
+
+    // A launch or delayed frame write may have placed the window since routing.
+    // Recheck before dispatching the fallback, not only before the direct attempt.
+    if dataSource.fetchSpacesForWindow(windowID).contains(targetSpaceID) {
+      Diagnostics.endTiming(token, outcome: "already-on-target-before-drag")
+      return true
     }
 
     // 4. Mission Control drag.
@@ -2391,6 +2401,10 @@ public class SpaceManager {
     // animation to wait out — only a brief settle for the activation itself.
     let currentSpaceIDs = Set(allSpaces.filter(\.isCurrent).map(\.id))
     let sourceSpaceIDs = dataSource.fetchSpacesForWindow(windowID)
+    guard !sourceSpaceIDs.contains(targetSpace.id) else {
+      Diagnostics.log("move-space", "window already on target before activation; skipping drag")
+      return true
+    }
     let needsSpaceSwitch = !sourceSpaceIDs.contains(where: { currentSpaceIDs.contains($0) })
     let sourceSpace = allSpaces.first(where: { sourceSpaceIDs.contains($0.id) })
 
