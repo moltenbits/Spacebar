@@ -89,10 +89,6 @@ final class KeyInterceptor {
     resizePresetApplied = true
   }
 
-  func setRestoring(_ active: Bool) {
-    restoring = active
-  }
-
   func beginSpaceTransferShortcutBlock() {
     restoring = true
   }

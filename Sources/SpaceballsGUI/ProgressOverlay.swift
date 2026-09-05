@@ -3,10 +3,8 @@ import SpaceballsGUILib
 import SwiftUI
 
 /// A full-screen, click-through overlay shown on EVERY display while a
-/// Mission Control automation (eject/restore) drives synthetic mouse input.
-/// Unmissable by design: the small StatusHUD sits below Mission Control's
-/// window level and is easy to overlook, and a stray user mouse move can
-/// break the drags mid-flight.
+/// Space or workspace restoration drives synthetic mouse input.
+/// Unmissable by design: a stray user mouse move can break the drags mid-flight.
 ///
 /// The panels sit ABOVE Mission Control (`.screenSaver` level) and MUST keep
 /// `ignoresMouseEvents = true` — the synthetic drag events route to whatever

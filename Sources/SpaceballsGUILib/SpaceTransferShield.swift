@@ -4,25 +4,27 @@ import SpaceballsCore
 public enum SpaceTransferOperation: Sendable {
   case eject
   case restore
+  case workspaceRestore(name: String)
 
   public var progressMessage: String {
     switch self {
     case .eject: "Ejecting Spaces…"
     case .restore: "Restoring Spaces…"
+    case .workspaceRestore(let name): "Setting up \(name)…"
     }
   }
 
   public var blockedInputSubtitle: String {
     switch self {
     case .eject: "Mouse interaction paused while ejecting…"
-    case .restore: "Mouse interaction paused while restoring…"
+    case .restore, .workspaceRestore: "Mouse interaction paused while restoring…"
     }
   }
 
   public var unblockedInputSubtitle: String {
     switch self {
     case .eject: "Please avoid mouse interaction while ejecting…"
-    case .restore: "Please avoid mouse interaction while restoring…"
+    case .restore, .workspaceRestore: "Please avoid mouse interaction while restoring…"
     }
   }
 }
@@ -44,13 +46,14 @@ public protocol SpaceTransferOverlayPresenting: AnyObject {
   func dismiss(fadingOver duration: TimeInterval)
 }
 
-/// Owns the user-facing and input-blocking lifecycle shared by eject and
-/// restore. Keeping both operations on this path prevents either side of the
+/// Owns the user-facing and input-blocking lifecycle shared by eject, display
+/// restore, and workspace setup. Keeping these operations on this path prevents the
 /// transfer from silently losing the overlay or physical-input protection.
 public final class SpaceTransferShield {
   private let mouseInputBlocker: any SpaceTransferMouseInputBlocking
   private let shortcutBlocker: any SpaceTransferShortcutBlocking
   private let overlay: any SpaceTransferOverlayPresenting
+  private var isActive = false
 
   public init(
     mouseInputBlocker: any SpaceTransferMouseInputBlocking,
@@ -63,6 +66,7 @@ public final class SpaceTransferShield {
   }
 
   public func begin(operation: SpaceTransferOperation, plannedMoves: Int) {
+    isActive = true
     let timeout = 20.0 + 6.0 * Double(max(0, plannedMoves))
     shortcutBlocker.beginSpaceTransferShortcutBlock()
     let isInputBlocked = mouseInputBlocker.beginSpaceTransferMouseBlock(for: timeout)
@@ -75,6 +79,8 @@ public final class SpaceTransferShield {
   }
 
   public func finish(message: String) {
+    guard isActive else { return }
+    isActive = false
     shortcutBlocker.endSpaceTransferShortcutBlock()
     mouseInputBlocker.endSpaceTransferMouseBlock()
     overlay.update(message: message, subtitle: nil, showsSpinner: false)

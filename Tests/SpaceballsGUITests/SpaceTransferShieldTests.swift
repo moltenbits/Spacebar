@@ -57,9 +57,29 @@ private final class OverlaySpy: SpaceTransferOverlayPresenting {
 
 @Suite("Space Transfer Shield")
 struct SpaceTransferShieldTests {
-  @Test("Eject and restore both present an overlay and block input")
+  @Test("A late completion after timeout cannot present another result or release input twice")
+  func finishAfterTimeoutIsIgnored() {
+    let mouseInputBlocker = MouseInputBlockerSpy()
+    let shortcutBlocker = ShortcutBlockerSpy()
+    let overlay = OverlaySpy()
+    let shield = SpaceTransferShield(
+      mouseInputBlocker: mouseInputBlocker,
+      shortcutBlocker: shortcutBlocker,
+      overlay: overlay)
+    shield.begin(operation: .workspaceRestore(name: "Work"), plannedMoves: 1)
+    shield.finish(message: "Setup timed out")
+    shield.finish(message: "Restored workspace")
+
+    #expect(mouseInputBlocker.endCount == 1)
+    #expect(shortcutBlocker.endCount == 1)
+    #expect(overlay.presentations.count == 2)
+    #expect(overlay.presentations.last?.message == "Setup timed out")
+    #expect(overlay.fadeDurations == [1.5])
+  }
+
+  @Test("Eject, display restore, and workspace setup all present an overlay and block input")
   func bothOperationsAreShielded() {
-    for operation in [SpaceTransferOperation.eject, .restore] {
+    for operation in [SpaceTransferOperation.eject, .restore, .workspaceRestore(name: "Work")] {
       let mouseInputBlocker = MouseInputBlockerSpy()
       let shortcutBlocker = ShortcutBlockerSpy()
       let overlay = OverlaySpy()
@@ -79,6 +99,12 @@ struct SpaceTransferShieldTests {
     }
   }
 
+  @Test("Workspace setup identifies the workspace in its progress message")
+  func workspaceProgressMessage() {
+    #expect(
+      SpaceTransferOperation.workspaceRestore(name: "Work").progressMessage == "Setting up Work…")
+  }
+
   @Test("A failed input block never claims mouse interaction is paused")
   func reportsBlockFailureHonestly() {
     let mouseInputBlocker = MouseInputBlockerSpy()
@@ -89,14 +115,17 @@ struct SpaceTransferShieldTests {
       shortcutBlocker: ShortcutBlockerSpy(),
       overlay: overlay)
 
-    shield.begin(operation: .restore, plannedMoves: 1)
+    shield.begin(operation: .workspaceRestore(name: "Work"), plannedMoves: 1)
 
     #expect(
-      overlay.presentations[0].subtitle == SpaceTransferOperation.restore.unblockedInputSubtitle)
+      overlay.presentations[0].subtitle
+        == SpaceTransferOperation.workspaceRestore(name: "Work").unblockedInputSubtitle)
   }
 
-  @Test("Finishing releases input and fades the result overlay")
-  func finishReleasesShield() {
+  @Test(
+    "Success, failure, and timeout all release input and fade the result overlay",
+    arguments: ["Restored Work", "Failed to set up Work", "Setup timed out"])
+  func finishReleasesShield(message: String) {
     let mouseInputBlocker = MouseInputBlockerSpy()
     let shortcutBlocker = ShortcutBlockerSpy()
     let overlay = OverlaySpy()
@@ -104,15 +133,15 @@ struct SpaceTransferShieldTests {
       mouseInputBlocker: mouseInputBlocker,
       shortcutBlocker: shortcutBlocker,
       overlay: overlay)
-    shield.begin(operation: .eject, plannedMoves: 1)
+    shield.begin(operation: .workspaceRestore(name: "Work"), plannedMoves: 1)
 
-    shield.finish(message: "Ejected 1 Space")
+    shield.finish(message: message)
 
     #expect(mouseInputBlocker.endCount == 1)
     #expect(shortcutBlocker.endCount == 1)
     #expect(
       overlay.presentations.last
-        == .init(message: "Ejected 1 Space", subtitle: nil, showsSpinner: false))
+        == .init(message: message, subtitle: nil, showsSpinner: false))
     #expect(overlay.fadeDurations == [1.5])
   }
 }
