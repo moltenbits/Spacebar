@@ -1,3 +1,4 @@
+import SpaceballsCore
 import SpaceballsGUILib
 import SwiftUI
 
@@ -87,10 +88,17 @@ struct WorkspaceDetailView: View {
           ) { launcherIdx, launcher in
             HStack {
               VStack(alignment: .leading, spacing: 2) {
-                Text(launcher.type.label)
-                  .font(.callout.weight(.medium))
+                Text(
+                  launcher.steps.count == 1
+                    ? launcher.steps[0].type.label : "\(launcher.steps.count)-step launcher"
+                )
+                .font(.callout.weight(.medium))
                 if !launcher.appName.isEmpty {
                   Text(launcher.appName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else if launcher.steps.count > 1 {
+                  Text(launcher.steps.map { $0.type.label }.joined(separator: " → "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
@@ -177,12 +185,27 @@ struct LauncherDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
           let launcher = settings.workspaces[workspaceIndex].launchers[launcherIndex]
 
-          Text(launcher.type.label)
+          Text("Launcher Pipeline")
             .font(.headline)
 
+          Text(
+            "Steps run from top to bottom. Steps that wait stop the pipeline on failure; background shell steps continue immediately. Use $PATH, $NAME, and $PROFILE in configurable values."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
+          Toggle(
+            "Allow relocating an existing window",
+            isOn: $settings.workspaces[workspaceIndex].launchers[launcherIndex].allowsExistingWindow
+          )
+          Text(
+            "Turn off when this launcher must create a new window, such as the iTerm and Safari templates."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
           HStack(spacing: 16) {
-            // Only show Profile field if the command uses $PROFILE
-            if launcher.command.contains("$PROFILE") || launcher.command.contains("${PROFILE}") {
+            if launcher.usesProfileVariable {
               VStack(alignment: .leading, spacing: 2) {
                 Text("Profile").font(.caption).foregroundStyle(.secondary)
                 TextField(
@@ -215,21 +238,267 @@ struct LauncherDetailView: View {
             }
           }
 
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Command").font(.caption).foregroundStyle(.secondary)
-            TextEditor(
-              text: $settings.workspaces[workspaceIndex].launchers[launcherIndex].command
-            )
-            .font(.system(.body, design: .monospaced))
-            .frame(maxWidth: .infinity, minHeight: 150)
-            .overlay(
-              RoundedRectangle(cornerRadius: 5)
-                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-            )
+          Divider()
+
+          ForEach(Array(launcher.steps.enumerated()), id: \.element.id) { stepIndex, step in
+            VStack(alignment: .leading, spacing: 10) {
+              HStack {
+                Text("\(stepIndex + 1). \(step.type.label)")
+                  .font(.callout.weight(.semibold))
+                Spacer()
+                Button {
+                  moveStep(from: stepIndex, by: -1)
+                } label: {
+                  Image(systemName: "arrow.up")
+                }
+                .buttonStyle(.borderless)
+                .disabled(stepIndex == 0)
+                .help("Move step earlier")
+
+                Button {
+                  moveStep(from: stepIndex, by: 1)
+                } label: {
+                  Image(systemName: "arrow.down")
+                }
+                .buttonStyle(.borderless)
+                .disabled(stepIndex == launcher.steps.count - 1)
+                .help("Move step later")
+
+                Button {
+                  removeStep(at: stepIndex)
+                } label: {
+                  Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.red)
+                }
+                .buttonStyle(.borderless)
+                .disabled(launcher.steps.count == 1)
+                .help(
+                  launcher.steps.count == 1
+                    ? "A launcher must contain at least one step" : "Remove step")
+              }
+
+              LauncherStepEditor(
+                step: $settings.workspaces[workspaceIndex].launchers[launcherIndex].steps[
+                  stepIndex],
+                bundleID: launcher.bundleID
+              )
+            }
+            .padding(12)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
           }
+
+          Menu("Add Step") {
+            ForEach(
+              [
+                WorkspaceLaunchType.launchServices, .applescript, .shell, .open,
+              ]
+            ) { type in
+              Button(type.label) {
+                settings.workspaces[workspaceIndex].launchers[launcherIndex].steps.append(
+                  WorkspaceLauncherStep(action: .empty(for: type)))
+              }
+            }
+          }
+          .menuStyle(.borderlessButton)
         }
         .padding(16)
       }
     }
+  }
+
+  private func moveStep(from index: Int, by offset: Int) {
+    let destination = index + offset
+    guard destination >= 0,
+      destination < settings.workspaces[workspaceIndex].launchers[launcherIndex].steps.count
+    else { return }
+    settings.workspaces[workspaceIndex].launchers[launcherIndex].steps.swapAt(
+      index, destination)
+  }
+
+  private func removeStep(at index: Int) {
+    guard settings.workspaces[workspaceIndex].launchers[launcherIndex].steps.count > 1 else {
+      return
+    }
+    settings.workspaces[workspaceIndex].launchers[launcherIndex].steps.remove(at: index)
+  }
+}
+
+private struct LauncherStepEditor: View {
+  @Binding var step: WorkspaceLauncherStep
+  let bundleID: String
+
+  var body: some View {
+    switch step.action {
+    case .launchServices:
+      LaunchServicesStepEditor(
+        configuration: launchServicesConfiguration, bundleID: bundleID)
+    case .appleScript:
+      commandEditor(
+        title: "Script", text: stringValue(for: .applescript), minimumHeight: 140)
+    case .shell:
+      VStack(alignment: .leading, spacing: 8) {
+        commandEditor(title: "Command", text: stringValue(for: .shell), minimumHeight: 100)
+        Toggle("Wait for command to finish", isOn: shellWaitsForExit)
+        Text(
+          "Turn off for commands that stay running with the app. Later steps will start immediately, and command failures will not stop the pipeline."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+    case .openApplication:
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Application Name").font(.caption).foregroundStyle(.secondary)
+        TextField("e.g. Preview", text: stringValue(for: .open))
+          .textFieldStyle(.roundedBorder)
+      }
+    }
+  }
+
+  private var launchServicesConfiguration: Binding<WorkspaceLaunchServicesConfiguration> {
+    Binding(
+      get: {
+        guard case .launchServices(let configuration) = step.action else {
+          return WorkspaceLaunchServicesConfiguration()
+        }
+        return configuration
+      },
+      set: { step.action = .launchServices($0) })
+  }
+
+  private func stringValue(for type: WorkspaceLaunchType) -> Binding<String> {
+    Binding(
+      get: {
+        switch step.action {
+        case .shell(let command, _): command
+        case .appleScript(let source): source
+        case .openApplication(let applicationName): applicationName
+        case .launchServices: ""
+        }
+      },
+      set: { value in
+        switch type {
+        case .shell: step.action = .shell(value, waitsForExit: shellWaitsForExit.wrappedValue)
+        case .applescript: step.action = .appleScript(value)
+        case .open: step.action = .openApplication(value)
+        case .launchServices: break
+        }
+      })
+  }
+
+  private var shellWaitsForExit: Binding<Bool> {
+    Binding(
+      get: {
+        guard case .shell(_, let waits) = step.action else { return true }
+        return waits
+      },
+      set: { waits in
+        guard case .shell(let command, _) = step.action else { return }
+        step.action = .shell(command, waitsForExit: waits)
+      })
+  }
+
+  private func commandEditor(
+    title: String, text: Binding<String>, minimumHeight: CGFloat
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title).font(.caption).foregroundStyle(.secondary)
+      TextEditor(text: text)
+        .font(.system(.body, design: .monospaced))
+        .frame(maxWidth: .infinity, minHeight: minimumHeight)
+        .overlay(
+          RoundedRectangle(cornerRadius: 5)
+            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+        )
+    }
+  }
+}
+
+private struct LaunchServicesStepEditor: View {
+  @Binding var configuration: WorkspaceLaunchServicesConfiguration
+  let bundleID: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      if bundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        Label(
+          "Enter a bundle ID above before using this Launch Services step.",
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.caption)
+        .foregroundStyle(.orange)
+      }
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Path or URL").font(.caption).foregroundStyle(.secondary)
+        TextField("Optional — $PATH opens the workspace project", text: $configuration.target)
+          .textFieldStyle(.roundedBorder)
+        Text("Leave blank to launch the application without opening a resource.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      Toggle(
+        "Create a new application instance", isOn: $configuration.createsNewApplicationInstance)
+
+      Toggle("Activate application", isOn: $configuration.activates)
+
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Arguments").font(.caption).foregroundStyle(.secondary)
+        TextEditor(text: argumentsText)
+          .font(.system(.body, design: .monospaced))
+          .frame(maxWidth: .infinity, minHeight: 70)
+          .overlay(
+            RoundedRectangle(cornerRadius: 5)
+              .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+          )
+        Text("Enter one argument per line.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Environment Variables").font(.caption).foregroundStyle(.secondary)
+        ForEach(Array(configuration.environment.enumerated()), id: \.element.id) {
+          index, variable in
+          HStack {
+            TextField("NAME", text: $configuration.environment[index].name)
+              .textFieldStyle(.roundedBorder)
+              .frame(width: 180)
+            TextField("Value", text: $configuration.environment[index].value)
+              .textFieldStyle(.roundedBorder)
+            Button {
+              configuration.environment.removeAll { $0.id == variable.id }
+            } label: {
+              Image(systemName: "minus.circle.fill")
+                .foregroundStyle(.red)
+            }
+            .buttonStyle(.borderless)
+          }
+        }
+        Button("Add Environment Variable") {
+          configuration.environment.append(WorkspaceEnvironmentVariable())
+        }
+        .buttonStyle(.borderless)
+      }
+
+      if !configuration.arguments.isEmpty || !configuration.environment.isEmpty {
+        Text(
+          "Arguments and environment variables affect only a newly launched process. Enable New Application Instance to guarantee they are used when the app is already running."
+        )
+        .font(.caption)
+        .foregroundStyle(
+          configuration.createsNewApplicationInstance ? Color.secondary : Color.orange)
+      }
+    }
+  }
+
+  private var argumentsText: Binding<String> {
+    Binding(
+      get: { configuration.arguments.joined(separator: "\n") },
+      set: { value in
+        configuration.arguments =
+          value.isEmpty
+          ? [] : value.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+      })
   }
 }

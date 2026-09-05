@@ -12,6 +12,7 @@ import Testing
 private final class RecordingExecutor: WindowMoveExecuting {
   var directResult: DirectWindowMoveResult = .moved(focused: true)
   var missionControlResult = true
+  var onDirectMove: (() -> Void)?
   private(set) var directRequests: [DirectWindowMoveRequest] = []
   private(set) var missionControlRequests: [MissionControlWindowMoveRequest] = []
   private(set) var order: [String] = []
@@ -19,6 +20,7 @@ private final class RecordingExecutor: WindowMoveExecuting {
   func performDirectWindowMove(_ request: DirectWindowMoveRequest) -> DirectWindowMoveResult {
     directRequests.append(request)
     order.append("direct")
+    onDirectMove?()
     return directResult
   }
 
@@ -52,9 +54,9 @@ private let frames: [String: CGRect] = [
 
 private func makeManager(
   windowSpaceIDs: [UInt64] = [1],
-  isOnscreen: Bool = true
+  isOnscreen: Bool = true,
+  dataSource ds: MutableCoreMockDataSource = MutableCoreMockDataSource()
 ) -> (SpaceManager, RecordingExecutor) {
-  var ds = MockDataSource()
   ds.displaySpaces = [
     makeDisplayDict(displayUUID: "display-A", spaceIDs: [1, 2], currentSpaceID: 1),
     makeDisplayDict(displayUUID: "display-B", spaceIDs: [3, 4], currentSpaceID: 3),
@@ -78,6 +80,33 @@ private func makeManager(
 
 @Suite("Window Move Routing")
 struct WindowMoveRoutingTests {
+
+  @Test(
+    "A window already on the destination succeeds without activation or a move",
+    arguments: [UInt64(3), UInt64(4)], [true, false])
+  func alreadyOnDestination(target: UInt64, activates: Bool) throws {
+    let (manager, executor) = makeManager(windowSpaceIDs: [target], isOnscreen: false)
+    manager.displayVisibleFramesProvider = { [:] }
+
+    let moved = try manager.moveWindowToSpace(
+      windowID: windowID, targetSpaceID: target, activateAfterMove: activates)
+
+    #expect(moved)
+    #expect(executor.order.isEmpty)
+  }
+
+  @Test("A window arriving during a direct attempt is not dragged by the fallback")
+  func arrivalBeforeFallback() throws {
+    let ds = MutableCoreMockDataSource()
+    let (manager, executor) = makeManager(dataSource: ds)
+    executor.directResult = .failed(reason: "verify-timeout")
+    executor.onDirectMove = {
+      ds.windowSpaces = [windowID: [3]]
+    }
+
+    #expect(try manager.moveWindowToSpace(windowID: windowID, targetSpaceID: 3))
+    #expect(executor.order == ["direct"])
+  }
 
   @Test("Both Spaces visible → direct leg only, with the planned frame and pid")
   func directWhenBothVisible() throws {

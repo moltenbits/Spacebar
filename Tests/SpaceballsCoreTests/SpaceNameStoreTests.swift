@@ -63,4 +63,21 @@ struct SpaceNameStoreTests {
     let store = makeStore()
     #expect(store.allCustomNames().isEmpty)
   }
+
+  @Test("Workspace name matching ignores stale mappings, fullscreen Spaces, and ordinal aliases")
+  func customNameMatchesOnlyLiveDesktop() {
+    let store = makeStore()
+    store.setCustomName("Work", forSpaceUUID: "stale")
+    store.setCustomName("Work", forSpaceUUID: "fullscreen")
+    let spaces = [
+      SpaceInfo(id: 1, uuid: "desktop", type: .desktop, displayUUID: "display", isCurrent: true),
+      SpaceInfo(
+        id: 2, uuid: "fullscreen", type: .fullscreen, displayUUID: "display", isCurrent: false),
+    ]
+    #expect(store.spaceWithCustomName("Work", in: spaces) == nil)
+    #expect(store.spaceWithCustomName("Desktop 1", in: spaces) == nil)
+    #expect(store.spaceWithCustomName("1", in: spaces) == nil)
+    store.setCustomName("Work", forSpaceUUID: "desktop")
+    #expect(store.spaceWithCustomName("work", in: spaces)?.id == 1)
+  }
 }

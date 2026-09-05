@@ -1,3 +1,4 @@
+import SpaceballsCore
 import SpaceballsGUILib
 import SwiftUI
 
@@ -166,10 +167,10 @@ struct SpacesPane: View {
       launchers: original.launchers.map {
         AppLauncher(
           label: $0.label,
-          type: $0.type,
           appName: $0.appName,
           bundleID: $0.bundleID,
-          command: $0.command)
+          allowsExistingWindow: $0.allowsExistingWindow,
+          steps: $0.steps.map { $0.duplicated() })
       }
     )
     // Ensure new UUIDs for the copy

@@ -33,12 +33,15 @@ struct WorkspaceRestorerHooks {
   var windowsBySpace: () -> [UInt64: [WindowInfo]]
   var launcherWindows: (String) -> [WorkspaceLauncherWindow] = { _ in [] }
   var switchToSpace: (UInt64) throws -> Void
-  var clickDesktop: (UInt64) -> Void
-  var executeLauncher: (String, String) throws -> Void
+  var focusDisplay: (UInt64) throws -> Void
+  var executeLauncher: (WorkspaceLaunchRequest) throws -> Void
   var relocateFocusedWindow: (String, UInt64, Set<Int>, Bool) throws -> WorkspaceLauncherPlacement
   var bundleIDForPID: (Int) -> String? = { _ in nil }
   var relocateWindow: (Int, UInt64) throws -> Bool = { _, _ in false }
   var sleep: (TimeInterval) -> Void
+  var diagnosticsEnabled: () -> Bool = { Diagnostics.enabled }
+  var frontmostApplication: () -> String = { "unknown" }
+  var logDiagnostic: (String) -> Void = { Diagnostics.log("workspace-restore", $0) }
 }
 
 /// Orchestrates workspace restoration: creates spaces, switches to each,
@@ -64,8 +67,8 @@ public final class WorkspaceRestorer {
         Self.accessibilityWindows(bundleID: bundleID, spaceManager: spaceManager)
       },
       switchToSpace: { try spaceManager.switchToSpace(id: $0) },
-      clickDesktop: { spaceManager.clickDesktopOnDisplay(forSpaceID: $0) },
-      executeLauncher: { try Self.executeLauncher(type: $0, command: $1) },
+      focusDisplay: { try spaceManager.focusDisplayForWorkspace(spaceID: $0) },
+      executeLauncher: { try WorkspaceLauncherExecutor.live.execute($0) },
       relocateFocusedWindow: {
         bundleID, targetSpaceID, preexistingWindowIDs, allowsExistingWindow in
         try Self.relocateFocusedWindow(
@@ -84,7 +87,11 @@ public final class WorkspaceRestorer {
           targetSpaceID: targetSpaceID,
           activateAfterMove: false)
       },
-      sleep: { Thread.sleep(forTimeInterval: $0) })
+      sleep: { Thread.sleep(forTimeInterval: $0) },
+      frontmostApplication: {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return "none" }
+        return "\(app.bundleIdentifier ?? "unknown") pid=\(app.processIdentifier)"
+      })
     self.init(
       spaceNameStore: spaceNameStore,
       windowLayoutRestorer: windowLayoutRestorer,
@@ -115,42 +122,48 @@ public final class WorkspaceRestorer {
     progress: ((Int, Int, String) -> Void)? = nil
   ) throws -> RestoreSummary {
     // 1. Create any missing spaces
-    let spacesCreated = try hooks.createDefaultSpaces(defaultNames, spaceNameStore)
+    let initialSpaces = hooks.allSpaces()
+    let missingNames = defaultNames.filter {
+      spaceNameStore.spaceWithCustomName($0, in: initialSpaces) == nil
+    }
+    let spacesCreated =
+      missingNames.isEmpty ? 0 : try hooks.createDefaultSpaces(missingNames, spaceNameStore)
 
     // Brief pause if spaces were created
     if spacesCreated > 0 {
       hooks.sleep(1.0)
     }
 
-    // 2. Restore each workspace that has launchers
-    let workspacesWithLaunchers = workspaces.filter { !$0.launchers.isEmpty }
+    // 2. Activate each workspace, including ones whose apps are already present.
     var appsLaunched = 0
     var errors: [(String, String, String)] = []
 
-    for (i, workspace) in workspacesWithLaunchers.enumerated() {
-      progress?(i, workspacesWithLaunchers.count, workspace.name)
+    for (i, workspace) in workspaces.enumerated() {
+      progress?(i, workspaces.count, workspace.name)
 
       // Resolve space name to ID
       let spaces = hooks.allSpaces()
-      guard let spaceID = spaceNameStore.resolveSpaceID(workspace.name, spaces: spaces) else {
+      guard let targetSpace = spaceNameStore.spaceWithCustomName(workspace.name, in: spaces) else {
         errors.append((workspace.name, "", "Space not found"))
         continue
       }
-      guard let targetSpace = spaces.first(where: { $0.id == spaceID }) else {
-        errors.append((workspace.name, "", "Resolved Space is missing from the current snapshot"))
-        continue
-      }
+      let spaceID = targetSpace.id
 
       // Check which apps are already running in this space
       let windowMap = hooks.windowsBySpace()
-      let existingApps = Set(
-        (windowMap[spaceID] ?? []).map(\.ownerName)
-      )
+      let existingWindows = (windowMap[spaceID] ?? []).map {
+        (appName: $0.ownerName, bundleID: hooks.bundleIDForPID($0.pid))
+      }
 
       // Filter to only launchers whose app isn't already in the space
       let missingLaunchers = workspace.launchers.filter { launcher in
-        if launcher.appName.isEmpty { return true }  // No app name → always run
-        return !existingApps.contains(launcher.appName)
+        !existingWindows.contains { window in
+          if !launcher.bundleID.isEmpty, let bundleID = window.bundleID, !bundleID.isEmpty {
+            return bundleID == launcher.bundleID
+          }
+          // Legacy launchers and unresolvable processes retain name-based matching.
+          return !launcher.appName.isEmpty && window.appName == launcher.appName
+        }
       }
 
       // Associate before launching so future Spaceballs resizes update the
@@ -162,15 +175,12 @@ public final class WorkspaceRestorer {
           displayUUID: targetSpace.displayUUID,
           bundleIDs: Set(workspace.launchers.map(\.bundleID).filter { !$0.isEmpty })) ?? false
 
-      // Existing windows still need an explicit workspace-layout restore.
-      guard !missingLaunchers.isEmpty || hasWorkspaceLayout else { continue }
-
       // Switch to the space and ensure it has keyboard focus.
-      // On multi-display, Launch Services opens apps on the display with
-      // keyboard focus, so we click on the target display's desktop after
-      // switching to ensure apps open on the correct display.
+      // On multi-display, establish focus on the target display without
+      // blindly clicking through whichever app happens to cover its center.
       do {
-        try focusTargetSpace(spaceID, forceSwitch: true)
+        try focusTargetSpace(
+          spaceID, forceSwitch: true, context: "workspace=\(workspace.id) initial")
       } catch {
         errors.append((workspace.name, "", "Failed to switch: \(error.localizedDescription)"))
         continue
@@ -185,9 +195,17 @@ public final class WorkspaceRestorer {
           preexistingWindowIDs.formUnion(
             hooks.launcherWindows(launcher.bundleID).map(\.id))
         }
-        let resolved = launcher.resolvedCommand(path: workspace.path, name: workspace.name)
+        let request = launcher.resolvedLaunchRequest(
+          path: workspace.path, name: workspace.name)
+        let context = launcherDiagnosticContext(
+          workspace: workspace, launcher: launcher, index: launcherIndex)
         do {
-          try hooks.executeLauncher(launcher.type, resolved)
+          if !hooks.allSpaces().contains(where: { $0.id == spaceID && $0.isCurrent }) {
+            try focusTargetSpace(spaceID, forceSwitch: false, context: context)
+          }
+          logState("before-launch", targetSpaceID: spaceID, context: context)
+          try hooks.executeLauncher(request)
+          logState("after-execute", targetSpaceID: spaceID, context: context)
           appsLaunched += 1
           if launcher.bundleID.isEmpty {
             hooks.sleep(1.0)
@@ -196,22 +214,23 @@ public final class WorkspaceRestorer {
               bundleID: launcher.bundleID,
               targetSpaceID: spaceID,
               preexistingWindowIDs: preexistingWindowIDs,
-              // Built-in AppleScript templates explicitly create a new
-              // window. Shell/open launchers may legitimately reactivate an
-              // existing project window (Tower and IntelliJ do this).
-              allowsExistingWindow: launcher.type != "applescript")
+              allowsExistingWindow: launcher.allowsExistingWindow)
           }
+          logState("after-placement", targetSpaceID: spaceID, context: context)
         } catch {
+          logState("launcher-failed", targetSpaceID: spaceID, context: context)
           errors.append(
             (
-              workspace.name, launcher.appName.isEmpty ? launcher.type : launcher.appName,
+              workspace.name,
+              launcher.appName.isEmpty
+                ? launcher.steps.first?.type.rawValue ?? "launcher" : launcher.appName,
               error.localizedDescription
             ))
         }
 
         guard launcherIndex < missingLaunchers.count - 1 else { continue }
         do {
-          try focusTargetSpace(spaceID, forceSwitch: false)
+          try focusTargetSpace(spaceID, forceSwitch: false, context: context)
         } catch {
           errors.append((workspace.name, "", "Failed to refocus: \(error.localizedDescription)"))
           focusFailed = true
@@ -223,9 +242,13 @@ public final class WorkspaceRestorer {
       // Launching or activating an already-running app can switch macOS back
       // to that app's existing Space. Return to the workspace before applying
       // its layout, even after the final launcher.
-      if !missingLaunchers.isEmpty {
+      if let lastLauncher = missingLaunchers.last {
         do {
-          try focusTargetSpace(spaceID, forceSwitch: false)
+          try focusTargetSpace(
+            spaceID, forceSwitch: false,
+            context: launcherDiagnosticContext(
+              workspace: workspace, launcher: lastLauncher,
+              index: missingLaunchers.count - 1))
         } catch {
           errors.append((workspace.name, "", "Failed to refocus: \(error.localizedDescription)"))
           continue
@@ -240,7 +263,7 @@ public final class WorkspaceRestorer {
       }
     }
 
-    progress?(workspacesWithLaunchers.count, workspacesWithLaunchers.count, "Done")
+    progress?(workspaces.count, workspaces.count, "Done")
 
     return RestoreSummary(
       spacesCreated: spacesCreated,
@@ -249,18 +272,49 @@ public final class WorkspaceRestorer {
     )
   }
 
-  private func focusTargetSpace(_ spaceID: UInt64, forceSwitch: Bool) throws {
-    let isCurrent = hooks.allSpaces().contains { $0.id == spaceID && $0.isCurrent }
-    if forceSwitch || !isCurrent {
-      if !forceSwitch {
-        Diagnostics.log(
-          "workspace-restore", "launcher changed active Space; refocusing space=\(spaceID)")
+  private func launcherDiagnosticContext(
+    workspace: WorkspaceConfigData, launcher: LauncherData, index: Int
+  ) -> String {
+    let steps = launcher.steps.map { step in
+      if case .launchServices(let configuration) = step.action {
+        return "launchServices(activates=\(configuration.activates))"
       }
-      try hooks.switchToSpace(spaceID)
-      hooks.sleep(2.0)  // Let focus and any fallback transition settle
+      return step.type.rawValue
+    }.joined(separator: ",")
+    // IDs and step types only: do not expose commands, paths, arguments, or environment values.
+    return
+      "workspace=\(workspace.id) launcher=\(index + 1) app=\(launcher.bundleID.isEmpty ? "unknown" : launcher.bundleID) steps=[\(steps)]"
+  }
+
+  private func logState(_ phase: String, targetSpaceID: UInt64, context: String) {
+    guard hooks.diagnosticsEnabled() else { return }
+    let current = hooks.allSpaces().filter(\.isCurrent).map {
+      "\($0.id)@\($0.displayUUID)"
+    }.sorted().joined(separator: ",")
+    hooks.logDiagnostic(
+      "phase=\(phase) \(context) targetSpace=\(targetSpaceID) currentSpaces=[\(current)] frontmost=\(hooks.frontmostApplication())"
+    )
+  }
+
+  private func focusTargetSpace(_ spaceID: UInt64, forceSwitch: Bool, context: String) throws {
+    for attempt in 0..<3 {
+      logState("before-refocus", targetSpaceID: spaceID, context: context)
+      let isCurrent = hooks.allSpaces().contains { $0.id == spaceID && $0.isCurrent }
+      if (forceSwitch && attempt == 0) || !isCurrent {
+        if !forceSwitch {
+          Diagnostics.log(
+            "workspace-restore", "launcher changed active Space; refocusing space=\(spaceID)")
+        }
+        try hooks.switchToSpace(spaceID)
+        hooks.sleep(2.0)  // Let focus and any fallback transition settle
+      }
+      logState("before-display-focus", targetSpaceID: spaceID, context: context)
+      try hooks.focusDisplay(spaceID)
+      hooks.sleep(0.5)
+      logState("after-display-focus", targetSpaceID: spaceID, context: context)
+      if hooks.allSpaces().contains(where: { $0.id == spaceID && $0.isCurrent }) { return }
     }
-    hooks.clickDesktop(spaceID)
-    hooks.sleep(0.5)
+    throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID)
   }
 
   private func waitForLaunchedWindowPlacement(
@@ -423,55 +477,6 @@ public final class WorkspaceRestorer {
     allowsExistingWindow || !preexistingWindowIDs.contains(windowID)
   }
 
-  static func executeLauncher(type: String, command: String) throws {
-    let process = Process()
-    var outputPipe: Pipe?
-    var waitsForExit = false
-
-    switch type {
-    case "shell":
-      process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-      process.arguments = ["-c", command]
-      process.standardOutput = FileHandle.nullDevice
-      process.standardError = FileHandle.nullDevice
-    case "applescript":
-      process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-      process.arguments = ["-e", command]
-      waitsForExit = true
-    case "open":
-      process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-      process.arguments = ["-a", command]
-      waitsForExit = true
-    default:
-      throw WorkspaceRestorerError.unknownLaunchType(type)
-    }
-
-    if waitsForExit {
-      let pipe = Pipe()
-      process.standardOutput = pipe
-      process.standardError = pipe
-      outputPipe = pipe
-    }
-
-    try process.run()
-    guard let outputPipe else {
-      // Shell launchers may intentionally remain alive for the lifetime of the
-      // launched app, so they stay fire-and-forget.
-      return
-    }
-
-    outputPipe.fileHandleForWriting.closeFile()
-    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    guard process.terminationStatus != 0 else { return }
-
-    let output = String(decoding: outputData, as: UTF8.self)
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    throw WorkspaceRestorerError.launcherFailed(
-      type: type,
-      status: process.terminationStatus,
-      output: output)
-  }
 }
 
 /// Lightweight data transfer struct so WorkspaceRestorer doesn't depend on
@@ -492,51 +497,103 @@ public struct WorkspaceConfigData {
 
 public struct LauncherData {
   public let label: String
-  public let type: String  // "shell", "applescript", "open"
-  public let command: String
+  public let steps: [WorkspaceLauncherStep]
   public let appName: String
   public let bundleID: String
+  public let allowsExistingWindow: Bool
 
   public init(
     label: String,
-    type: String,
+    steps: [WorkspaceLauncherStep],
+    appName: String = "",
+    bundleID: String = "",
+    allowsExistingWindow: Bool = true
+  ) {
+    self.label = label
+    self.steps = steps
+    self.appName = appName
+    self.bundleID = bundleID
+    self.allowsExistingWindow = allowsExistingWindow
+  }
+
+  public init(
+    label: String,
+    type: WorkspaceLaunchType,
     command: String,
     appName: String = "",
     bundleID: String = ""
   ) {
-    self.label = label
-    self.type = type
-    self.command = command
-    self.appName = appName
-    self.bundleID = bundleID
+    self.init(
+      label: label,
+      steps: [
+        WorkspaceLauncherStep(
+          action: type == .shell
+            ? .shell(command, waitsForExit: false)
+            : WorkspaceLauncherAction(type: type, value: command))
+      ],
+      appName: appName,
+      bundleID: bundleID,
+      allowsExistingWindow: type != .applescript)
   }
 
-  public func resolvedCommand(path: String?, name: String) -> String {
-    var cmd = command
+  private func resolvedValue(_ value: String, path: String?, name: String) -> String {
+    var resolved = value
     let expandedPath = (path as NSString?)?.expandingTildeInPath ?? ""
-    let resolvedProfile = label.isEmpty ? name : label
-    cmd = cmd.replacingOccurrences(of: "$PATH", with: expandedPath)
-    cmd = cmd.replacingOccurrences(of: "${PATH}", with: expandedPath)
-    cmd = cmd.replacingOccurrences(of: "$NAME", with: name)
-    cmd = cmd.replacingOccurrences(of: "${NAME}", with: name)
-    cmd = cmd.replacingOccurrences(of: "$PROFILE", with: resolvedProfile)
-    cmd = cmd.replacingOccurrences(of: "${LABEL}", with: resolvedProfile)
-    return cmd
+    var resolvedProfile = label.isEmpty ? name : label
+    resolvedProfile = resolvedProfile.replacingOccurrences(of: "$PATH", with: expandedPath)
+    resolvedProfile = resolvedProfile.replacingOccurrences(of: "${PATH}", with: expandedPath)
+    resolvedProfile = resolvedProfile.replacingOccurrences(of: "$NAME", with: name)
+    resolvedProfile = resolvedProfile.replacingOccurrences(of: "${NAME}", with: name)
+    resolved = resolved.replacingOccurrences(of: "$PATH", with: expandedPath)
+    resolved = resolved.replacingOccurrences(of: "${PATH}", with: expandedPath)
+    resolved = resolved.replacingOccurrences(of: "$NAME", with: name)
+    resolved = resolved.replacingOccurrences(of: "${NAME}", with: name)
+    resolved = resolved.replacingOccurrences(of: "$PROFILE", with: resolvedProfile)
+    resolved = resolved.replacingOccurrences(of: "${PROFILE}", with: resolvedProfile)
+    resolved = resolved.replacingOccurrences(of: "$LABEL", with: resolvedProfile)
+    resolved = resolved.replacingOccurrences(of: "${LABEL}", with: resolvedProfile)
+    return resolved
+  }
+
+  func resolvedLaunchRequest(path: String?, name: String) -> WorkspaceLaunchRequest {
+    WorkspaceLaunchRequest(
+      steps: steps.map { step in
+        switch step.action {
+        case .shell(let command, let waitsForExit):
+          return .shell(resolvedValue(command, path: path, name: name), waitsForExit: waitsForExit)
+        case .appleScript(let source):
+          return .appleScript(resolvedValue(source, path: path, name: name))
+        case .openApplication(let applicationName):
+          return .openApplication(resolvedValue(applicationName, path: path, name: name))
+        case .launchServices(let configuration):
+          return .launchServices(
+            WorkspaceLaunchServicesConfiguration(
+              target: resolvedValue(configuration.target, path: path, name: name),
+              arguments: configuration.arguments.map {
+                resolvedValue($0, path: path, name: name)
+              },
+              environment: configuration.environment.map {
+                WorkspaceEnvironmentVariable(
+                  id: $0.id,
+                  name: $0.name,
+                  value: resolvedValue($0.value, path: path, name: name))
+              },
+              createsNewApplicationInstance: configuration.createsNewApplicationInstance,
+              activates: configuration.activates))
+        }
+      },
+      bundleID: bundleID)
   }
 }
 
 public enum WorkspaceRestorerError: Error, LocalizedError {
-  case unknownLaunchType(String)
-  case launcherFailed(type: String, status: Int32, output: String)
+  case targetSpaceFocusFailed(spaceID: UInt64)
   case windowRelocationFailed(windowID: Int, targetSpaceID: UInt64)
 
   public var errorDescription: String? {
     switch self {
-    case .unknownLaunchType(let type):
-      return "Unknown launch type: \(type)"
-    case .launcherFailed(let type, let status, let output):
-      let detail = output.isEmpty ? "no error output" : output
-      return "\(type) launcher exited with status \(status): \(detail)"
+    case .targetSpaceFocusFailed(let spaceID):
+      return "Could not safely focus workspace Space \(spaceID)"
     case .windowRelocationFailed(let windowID, let targetSpaceID):
       return "Failed to move window \(windowID) to Space \(targetSpaceID)"
     }

@@ -567,10 +567,12 @@ public class SpaceManager {
     defaultNames: [String], spaceNameStore: SpaceNameStoring,
     completion: @escaping (Int) -> Void
   ) {
-    spaceNameStore.pruneStaleNames(currentSpaces: getAllSpaces())
+    let spaces = getAllSpaces()
+    spaceNameStore.pruneStaleNames(currentSpaces: spaces)
 
-    let existingNames = Set(spaceNameStore.allCustomNames().values)
-    let missingNames = defaultNames.filter { !existingNames.contains($0) }
+    let missingNames = defaultNames.filter {
+      spaceNameStore.spaceWithCustomName($0, in: spaces) == nil
+    }
 
     guard !missingNames.isEmpty else {
       completion(0)
@@ -615,10 +617,12 @@ public class SpaceManager {
       throw SpaceCreateError.accessibilityNotTrusted
     }
 
-    spaceNameStore.pruneStaleNames(currentSpaces: getAllSpaces())
+    let spaces = getAllSpaces()
+    spaceNameStore.pruneStaleNames(currentSpaces: spaces)
 
-    let existingNames = Set(spaceNameStore.allCustomNames().values)
-    let missingNames = defaultNames.filter { !existingNames.contains($0) }
+    let missingNames = defaultNames.filter {
+      spaceNameStore.spaceWithCustomName($0, in: spaces) == nil
+    }
     guard !missingNames.isEmpty else { return 0 }
 
     let beforeUUIDs = Set(getAllSpaces().map(\.uuid))
@@ -1996,14 +2000,32 @@ public class SpaceManager {
 
   // MARK: - Display Focus
 
-  /// Clicks on the desktop of the display containing the given space to
-  /// transfer keyboard focus to that display. This ensures Launch Services
-  /// opens new apps on the correct display.
-  public func clickDesktopOnDisplay(forSpaceID spaceID: UInt64) {
+  /// Establishes display focus without clicking through an application window.
+  /// Single-display restores need no extra focus action after switching Spaces.
+  public func focusDisplayForWorkspace(spaceID: UInt64) throws {
     let allSpaces = getAllSpaces()
+    let displayCount = Set(allSpaces.map(\.displayUUID)).count
+    guard displayCount > 1 else { return }
+    let focusedSpaces =
+      WindowResizer.focusedWindowID().map {
+        dataSource.fetchSpacesForWindow(Int($0.windowID))
+      } ?? []
+    guard
+      Self.workspaceDisplayNeedsFocus(
+        displayCount: displayCount,
+        focusedWindowSpaceIDs: focusedSpaces, targetSpaceID: spaceID)
+    else { return }
+
+    // Activate an actual workspace window rather than clicking an arbitrary point
+    // inside it. The restorer verifies Space membership again after focus settles.
+    if let window = getAllWindows().first(where: { $0.spaceIDs == [spaceID] }) {
+      try activateWindow(id: window.id)
+      return
+    }
+
     guard let space = allSpaces.first(where: { $0.id == spaceID }),
       let screenNumber = Self.displayIDForUUID(space.displayUUID)
-    else { return }
+    else { throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID) }
 
     // Find the NSScreen matching this display
     guard
@@ -2012,16 +2034,52 @@ public class SpaceManager {
         return (desc[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID)
           == screenNumber
       })
-    else { return }
+    else { throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID) }
 
-    // Convert screen center to CGEvent coordinates (top-left origin)
+    // Only an exposed desktop point is safe. Ignore our own click-through overlay
+    // and desktop-layer windows, but count other visible windows as obstacles.
     let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
-    let center = CGPoint(
-      x: screen.frame.midX,
-      y: primaryHeight - screen.frame.midY
-    )
+    let visible = screen.visibleFrame
+    let frame = CGRect(
+      x: visible.minX, y: primaryHeight - visible.maxY,
+      width: visible.width, height: visible.height)
+    var obstacles: [CGRect] = []
+    for entry in dataSource.fetchOnScreenWindowList() {
+      if (entry[kCGWindowOwnerPID as String] as? Int)
+        == Int(ProcessInfo.processInfo.processIdentifier)
+      {
+        continue
+      }
+      if let layer = entry[kCGWindowLayer as String] as? Int, layer < 0 { continue }
+      guard let bounds = Self.windowBounds(in: entry) else {
+        throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID)
+      }
+      obstacles.append(bounds)
+    }
+    guard let point = Self.workspaceDesktopFocusPoint(in: frame, occupiedBounds: obstacles) else {
+      throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID)
+    }
+    Self.postMouseClick(at: point)
+  }
 
-    SpaceManager.postMouseClick(at: center)
+  static func workspaceDisplayNeedsFocus(
+    displayCount: Int, focusedWindowSpaceIDs: [UInt64], targetSpaceID: UInt64
+  ) -> Bool {
+    displayCount > 1 && focusedWindowSpaceIDs != [targetSpaceID]
+  }
+
+  static func workspaceDesktopFocusPoint(in frame: CGRect, occupiedBounds: [CGRect]) -> CGPoint? {
+    let inset = frame.insetBy(dx: 12, dy: 12)
+    guard inset.width > 0, inset.height > 0 else { return nil }
+    for y in [inset.minY, inset.maxY, inset.midY] {
+      for x in [inset.minX, inset.maxX, inset.midX] {
+        let point = CGPoint(x: x, y: y)
+        if !occupiedBounds.contains(where: { $0.insetBy(dx: -2, dy: -2).contains(point) }) {
+          return point
+        }
+      }
+    }
+    return nil
   }
 
   /// Posts a click (mouseDown + mouseUp) at the given point.
@@ -2262,7 +2320,7 @@ public class SpaceManager {
   ///   - activateAfterMove: bring the moved window to front afterwards. When
   ///     off, the user's current Spaces and focus are left untouched.
   /// - Throws: `WindowActivationError` if the window can't be found or activated.
-  /// - Returns: `true` if the window was moved.
+  /// - Returns: `true` if the window was moved or was already on the target Space.
   @discardableResult
   public func moveWindowToSpace(
     windowID: Int, targetSpaceID: UInt64, activateAfterMove: Bool = true
@@ -2304,6 +2362,9 @@ public class SpaceManager {
       displayVisibleFrames: displayVisibleFramesProvider())
     var directFallbackReason: String?
     switch route {
+    case .alreadyOnTarget:
+      Diagnostics.endTiming(token, outcome: "already-on-target")
+      return true
     case .direct(let targetFrame):
       guard let rawPID = entry[kCGWindowOwnerPID as String] as? Int else {
         directFallbackReason = "pid-unknown"
@@ -2336,6 +2397,13 @@ public class SpaceManager {
     if let directFallbackReason {
       Diagnostics.log(
         "move-space", "direct-fallback:\(directFallbackReason) — using Mission Control")
+    }
+
+    // A launch or delayed frame write may have placed the window since routing.
+    // Recheck before dispatching the fallback, not only before the direct attempt.
+    if dataSource.fetchSpacesForWindow(windowID).contains(targetSpaceID) {
+      Diagnostics.endTiming(token, outcome: "already-on-target-before-drag")
+      return true
     }
 
     // 4. Mission Control drag.
@@ -2387,6 +2455,10 @@ public class SpaceManager {
     // animation to wait out — only a brief settle for the activation itself.
     let currentSpaceIDs = Set(allSpaces.filter(\.isCurrent).map(\.id))
     let sourceSpaceIDs = dataSource.fetchSpacesForWindow(windowID)
+    guard !sourceSpaceIDs.contains(targetSpace.id) else {
+      Diagnostics.log("move-space", "window already on target before activation; skipping drag")
+      return true
+    }
     let needsSpaceSwitch = !sourceSpaceIDs.contains(where: { currentSpaceIDs.contains($0) })
     let sourceSpace = allSpaces.first(where: { sourceSpaceIDs.contains($0.id) })
 

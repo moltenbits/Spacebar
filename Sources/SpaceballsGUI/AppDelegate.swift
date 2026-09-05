@@ -16,7 +16,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var resizePanels: [ResizePanel] = []
   private var resizeViewModel: ResizeViewModel!
   private var resizeOverlays: [ResizeOverlay] = []
-  private let statusHUD = StatusHUD()
   private var cancellables = Set<AnyCancellable>()
   var windowLayoutStore: WindowLayoutStore!
   private var windowLayoutCoordinator: WindowLayoutCoordinator!
@@ -27,8 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     mouseInputBlocker: mouseBlocker,
     shortcutBlocker: keyInterceptor,
     overlay: progressOverlay)
-  /// One eject/restore MC session at a time; also blocks auto-restore from
-  /// firing mid-eject.
+  /// One eject, display restore, or workspace setup at a time. These operations
+  /// share the overlay and may all drive Mission Control.
   private var spaceEvacuationInFlight = false
   private var pendingRestoreWork: DispatchWorkItem?
   private var restoreFailedAttempts = 0
@@ -120,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
       self.permissionsGrantTimer?.invalidate()
       self.permissionsGrantTimer = nil
-      self.statusHUD.show(message: "Screen Recording granted — restarting Spaceballs…")
+      self.progressOverlay.show(message: "Screen Recording granted — restarting Spaceballs…")
       DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
         Self.relaunchFromBundle()
       }
@@ -906,7 +905,7 @@ extension AppDelegate: KeyInterceptorDelegate {
     guard !spaceEvacuationInFlight else { return }
     keyInterceptor.setSuppressConfirm(true)
     hidePanel()
-    runSpaceRestore(onlyArmed: false, showHUD: true)
+    runSpaceRestore(onlyArmed: false, showOverlay: true)
   }
 
   func keyInterceptorEjectSpaces() {
@@ -995,11 +994,11 @@ extension AppDelegate: KeyInterceptorDelegate {
     }
     let plan = viewModel.spaceManager.restorePlan(ejectStore: ejectStore, onlyArmed: true)
     // Stale/already-home records still need clearing even when nothing
-    // moves, but only a real move warrants the HUD and input blocking.
+    // moves, but only a real move warrants the overlay and input blocking.
     let hasMoves = !plan.moves.isEmpty
     if !hasMoves && plan.stale.isEmpty && plan.completed.isEmpty { return }
 
-    runSpaceRestore(onlyArmed: true, showHUD: hasMoves)
+    runSpaceRestore(onlyArmed: true, showOverlay: hasMoves)
   }
 
   /// After an automatic restore run, retries with backoff when armed records
@@ -1031,11 +1030,11 @@ extension AppDelegate: KeyInterceptorDelegate {
 
   /// Shared restore runner for the auto path (armed records only) and the
   /// manual Cmd+Shift+E path (everything movable).
-  private func runSpaceRestore(onlyArmed: Bool, showHUD: Bool) {
+  private func runSpaceRestore(onlyArmed: Bool, showOverlay: Bool) {
     let plan = viewModel.spaceManager.restorePlan(ejectStore: ejectStore, onlyArmed: onlyArmed)
     let hadPending = !plan.isEmpty
     spaceEvacuationInFlight = true
-    if showHUD {
+    if showOverlay {
       spaceTransferShield.begin(operation: .restore, plannedMoves: plan.moves.count)
     }
 
@@ -1048,7 +1047,7 @@ extension AppDelegate: KeyInterceptorDelegate {
       DispatchQueue.main.async {
         self.spaceEvacuationInFlight = false
         if onlyArmed { self.scheduleRetryIfIncomplete() }
-        guard showHUD else { return }
+        guard showOverlay else { return }
         let message: String
         switch result {
         case .success(let summary) where !summary.restored.isEmpty:
@@ -1146,6 +1145,7 @@ extension AppDelegate: KeyInterceptorDelegate {
   }
 
   private func confirmCreateMenuSelection() {
+    guard !spaceEvacuationInFlight else { return }
     guard let selIdx = viewModel.createMenuSelection,
       selIdx < viewModel.createMenuItems.count
     else { return }
@@ -1179,21 +1179,21 @@ extension AppDelegate: KeyInterceptorDelegate {
         workspacesToRestore = [appSettings.workspaces[wsIdx]]
       }
       keyInterceptor.setSuppressConfirm(true)
-      keyInterceptor.setRestoring(true)
+      spaceEvacuationInFlight = true
 
       let displayName =
         workspacesToRestore.count == 1
         ? workspacesToRestore[0].name : "workspaces"
-      statusHUD.show(message: "Setting up \(displayName)…")
+      spaceTransferShield.begin(
+        operation: .workspaceRestore(name: displayName),
+        plannedMoves: workspacesToRestore.reduce(0) { $0 + $1.launchers.count })
 
       // Safety timeout — window placement may include a Mission Control move.
       let restoreTimeout = DispatchWorkItem { [weak self] in
-        guard let self, self.keyInterceptor.restoring else { return }
-        self.keyInterceptor.setRestoring(false)
-        self.statusHUD.show(message: "Setup timed out")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-          self.statusHUD.dismiss()
-        }
+        guard let self else { return }
+        self.spaceTransferShield.finish(message: "Setup timed out")
+        // Release input, but keep the shared automation gate until the worker
+        // actually returns: a timeout cannot cancel an in-flight launcher.
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: restoreTimeout)
 
@@ -1214,10 +1214,10 @@ extension AppDelegate: KeyInterceptorDelegate {
             launchers: ws.launchers.map { l in
               LauncherData(
                 label: l.label,
-                type: l.type.rawValue,
-                command: l.command,
+                steps: l.steps,
                 appName: l.appName,
-                bundleID: l.bundleID)
+                bundleID: l.bundleID,
+                allowsExistingWindow: l.allowsExistingWindow)
             }
           )
         }
@@ -1229,14 +1229,17 @@ extension AppDelegate: KeyInterceptorDelegate {
 
         DispatchQueue.main.async {
           restoreTimeout.cancel()
-          self.keyInterceptor.setRestoring(false)
-          self.statusHUD.dismiss()
-          if summary == nil {
-            self.statusHUD.show(message: "Failed to set up \(displayName)")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-              self.statusHUD.dismiss()
-            }
+          self.spaceEvacuationInFlight = false
+          let message: String
+          if let summary {
+            message =
+              summary.errors.isEmpty
+              ? "Restored \(displayName)"
+              : "Restored \(displayName) with \(summary.errors.count) error(s)"
+          } else {
+            message = "Failed to set up \(displayName)"
           }
+          self.spaceTransferShield.finish(message: message)
         }
       }
     } else {
