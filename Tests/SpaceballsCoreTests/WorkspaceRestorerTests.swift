@@ -6,6 +6,178 @@ import Testing
 @Suite("Workspace Restoration Layout Integration")
 struct WorkspaceRestorerTests {
   @Test(
+    "Reactivating a named workspace reuses its Space and opens only missing apps",
+    arguments: ["Work", "work", "101", "Desktop 1"])
+  func reactivatePartialWorkspace(name: String) throws {
+    let other = space(id: 101, uuid: "other")
+    let target = space(id: 102, uuid: "workspace", displayUUID: "display-B")
+    let names = makeNameStore([target.uuid: name == "work" ? "Work" : name])
+    var creationRequests: [[String]] = []
+    var switched: [UInt64] = []
+    var launched: [String] = []
+    let terminal = WindowInfo(
+      id: 1, ownerName: "iTerm2", name: "Work", pid: 10, bounds: .zero,
+      spaceIDs: [target.id])
+    let safariElsewhere = WindowInfo(
+      id: 2, ownerName: "Safari", name: "Other", pid: 20, bounds: .zero,
+      spaceIDs: [other.id])
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { requested, _ in
+        creationRequests.append(requested)
+        return 0
+      },
+      allSpaces: { [other, target] },
+      windowsBySpace: { [target.id: [terminal], other.id: [safariElsewhere]] },
+      switchToSpace: { switched.append($0) },
+      clickDesktop: { #expect($0 == target.id) },
+      executeLauncher: { launched.append($0.bundleID) },
+      relocateFocusedWindow: { _, spaceID, _, _ in
+        #expect(spaceID == target.id)
+        return .onTarget
+      },
+      bundleIDForPID: { $0 == 10 ? "com.googlecode.iterm2" : "com.apple.Safari" },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: names, windowLayoutRestorer: nil, hooks: hooks)
+    let result = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "work", name: name, path: nil,
+          launchers: [
+            LauncherData(
+              label: "Terminal", type: .open, command: "iTerm",
+              appName: "iTerm", bundleID: "com.googlecode.iterm2"),
+            LauncherData(
+              label: "Browser", type: .open, command: "Safari",
+              appName: "Safari", bundleID: "com.apple.Safari"),
+          ])
+      ], defaultNames: [name])
+
+    #expect(creationRequests.isEmpty)
+    #expect(switched == [target.id])
+    #expect(launched == ["com.apple.Safari"])
+    #expect(result.spacesCreated == 0)
+    #expect(result.appsLaunched == 1)
+    #expect(result.errors.isEmpty)
+  }
+
+  @Test("Reactivating a complete workspace still switches to its existing Space")
+  func reactivateCompleteWorkspace() throws {
+    let target = space(id: 101, uuid: "complete")
+    var switched: [UInt64] = []
+    let existing = WindowInfo(
+      id: 1, ownerName: "Safari", name: "Work", pid: 10, bounds: .zero,
+      spaceIDs: [target.id])
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in
+        Issue.record("Must not create a Space")
+        return 0
+      },
+      allSpaces: { [target] },
+      windowsBySpace: { [target.id: [existing]] },
+      switchToSpace: { switched.append($0) },
+      clickDesktop: { _ in },
+      executeLauncher: { _ in Issue.record("Must not relaunch an existing app") },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: makeNameStore([target.uuid: "Work"]), windowLayoutRestorer: nil, hooks: hooks)
+    let result = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "work", name: "Work", path: nil,
+          launchers: [LauncherData(label: "", type: .open, command: "Safari", appName: "Safari")])
+      ],
+      defaultNames: ["Work"])
+    #expect(switched == [target.id])
+    #expect(result.appsLaunched == 0)
+    #expect(result.errors.isEmpty)
+  }
+
+  @Test("Bundle identity takes precedence over app labels", arguments: [true, false])
+  func existingAppIdentity(matchesBundle: Bool) throws {
+    let target = space(id: 101, uuid: "identity")
+    var launches = 0
+    let existing = WindowInfo(
+      id: 1, ownerName: "Safari", name: "Work", pid: 10, bounds: .zero,
+      spaceIDs: [target.id])
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 },
+      allSpaces: { [target] }, windowsBySpace: { [target.id: [existing]] },
+      switchToSpace: { _ in }, clickDesktop: { _ in },
+      executeLauncher: { _ in launches += 1 },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget },
+      bundleIDForPID: { _ in matchesBundle ? "com.apple.Safari" : "com.example.other" },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: makeNameStore([target.uuid: "Work"]), windowLayoutRestorer: nil, hooks: hooks)
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "work", name: "Work", path: nil,
+          launchers: [
+            LauncherData(
+              label: "", type: .open, command: "Safari",
+              appName: matchesBundle ? "" : "Safari", bundleID: "com.apple.Safari")
+          ])
+      ],
+      defaultNames: ["Work"])
+    #expect(launches == (matchesBundle ? 0 : 1))
+  }
+
+  @Test("Only absent workspace Spaces are created; stale names cannot prevent recreation")
+  func createOnlyMissingSpaces() throws {
+    let existing = space(id: 101, uuid: "existing")
+    let newSpace = space(id: 102, uuid: "new")
+    let names = makeNameStore([existing.uuid: "Work", "stale": "Personal"])
+    var spaces = [existing]
+    var switched: [UInt64] = []
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { requested, store in
+        #expect(requested == ["Personal"])
+        spaces.append(newSpace)
+        store.setCustomName("Personal", forSpaceUUID: newSpace.uuid)
+        return 1
+      },
+      allSpaces: { spaces }, windowsBySpace: { [:] },
+      switchToSpace: { switched.append($0) }, clickDesktop: { _ in },
+      executeLauncher: { _ in Issue.record("No launchers configured") },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget }, sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: names, windowLayoutRestorer: nil, hooks: hooks)
+    let result = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(id: "work", name: "Work", path: nil, launchers: []),
+        WorkspaceConfigData(id: "personal", name: "Personal", path: nil, launchers: []),
+      ], defaultNames: ["Work", "Personal"])
+    #expect(switched == [existing.id, newSpace.id])
+    #expect(result.spacesCreated == 1)
+    #expect(result.appsLaunched == 0)
+    #expect(result.errors.isEmpty)
+  }
+
+  @Test("An unresolved workspace reports an error without launching on another Space")
+  func missingSpaceDoesNotLaunch() throws {
+    let other = space(id: 101, uuid: "other")
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 }, allSpaces: { [other] }, windowsBySpace: { [:] },
+      switchToSpace: { _ in Issue.record("Must not switch to an unrelated Space") },
+      clickDesktop: { _ in }, executeLauncher: { _ in Issue.record("Must not launch") },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget }, sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: makeNameStore([:]), windowLayoutRestorer: nil, hooks: hooks)
+    let result = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "work", name: "Desktop 1", path: nil,
+          launchers: [LauncherData(label: "", type: .open, command: "Safari")])
+      ],
+      defaultNames: ["Desktop 1"])
+    #expect(result.errors.count == 1)
+    #expect(result.appsLaunched == 0)
+  }
+
+  @Test(
     "Window reuse follows launcher policy even with an AppleScript step", arguments: [true, false])
   func composedWindowReusePolicy(allowsExisting: Bool) throws {
     let target = space(id: 101, uuid: "reuse-policy")

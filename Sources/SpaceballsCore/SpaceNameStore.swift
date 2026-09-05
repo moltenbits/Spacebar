@@ -10,6 +10,16 @@ public protocol SpaceNameStoring: AnyObject {
   func resolveSpaceID(_ input: String, spaces: [SpaceInfo]) -> UInt64?
 }
 
+extension SpaceNameStoring {
+  /// Workspace names are literal custom names, never numeric IDs or Desktop N aliases.
+  func spaceWithCustomName(_ name: String, in spaces: [SpaceInfo]) -> SpaceInfo? {
+    spaces.first {
+      $0.type == .desktop
+        && customName(forSpaceUUID: $0.uuid)?.localizedCaseInsensitiveCompare(name) == .orderedSame
+    }
+  }
+}
+
 // MARK: - UserDefaults Implementation
 
 public final class SpaceNameStore: SpaceNameStoring {

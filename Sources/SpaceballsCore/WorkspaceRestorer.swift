@@ -115,42 +115,48 @@ public final class WorkspaceRestorer {
     progress: ((Int, Int, String) -> Void)? = nil
   ) throws -> RestoreSummary {
     // 1. Create any missing spaces
-    let spacesCreated = try hooks.createDefaultSpaces(defaultNames, spaceNameStore)
+    let initialSpaces = hooks.allSpaces()
+    let missingNames = defaultNames.filter {
+      spaceNameStore.spaceWithCustomName($0, in: initialSpaces) == nil
+    }
+    let spacesCreated =
+      missingNames.isEmpty ? 0 : try hooks.createDefaultSpaces(missingNames, spaceNameStore)
 
     // Brief pause if spaces were created
     if spacesCreated > 0 {
       hooks.sleep(1.0)
     }
 
-    // 2. Restore each workspace that has launchers
-    let workspacesWithLaunchers = workspaces.filter { !$0.launchers.isEmpty }
+    // 2. Activate each workspace, including ones whose apps are already present.
     var appsLaunched = 0
     var errors: [(String, String, String)] = []
 
-    for (i, workspace) in workspacesWithLaunchers.enumerated() {
-      progress?(i, workspacesWithLaunchers.count, workspace.name)
+    for (i, workspace) in workspaces.enumerated() {
+      progress?(i, workspaces.count, workspace.name)
 
       // Resolve space name to ID
       let spaces = hooks.allSpaces()
-      guard let spaceID = spaceNameStore.resolveSpaceID(workspace.name, spaces: spaces) else {
+      guard let targetSpace = spaceNameStore.spaceWithCustomName(workspace.name, in: spaces) else {
         errors.append((workspace.name, "", "Space not found"))
         continue
       }
-      guard let targetSpace = spaces.first(where: { $0.id == spaceID }) else {
-        errors.append((workspace.name, "", "Resolved Space is missing from the current snapshot"))
-        continue
-      }
+      let spaceID = targetSpace.id
 
       // Check which apps are already running in this space
       let windowMap = hooks.windowsBySpace()
-      let existingApps = Set(
-        (windowMap[spaceID] ?? []).map(\.ownerName)
-      )
+      let existingWindows = (windowMap[spaceID] ?? []).map {
+        (appName: $0.ownerName, bundleID: hooks.bundleIDForPID($0.pid))
+      }
 
       // Filter to only launchers whose app isn't already in the space
       let missingLaunchers = workspace.launchers.filter { launcher in
-        if launcher.appName.isEmpty { return true }  // No app name → always run
-        return !existingApps.contains(launcher.appName)
+        !existingWindows.contains { window in
+          if !launcher.bundleID.isEmpty, let bundleID = window.bundleID, !bundleID.isEmpty {
+            return bundleID == launcher.bundleID
+          }
+          // Legacy launchers and unresolvable processes retain name-based matching.
+          return !launcher.appName.isEmpty && window.appName == launcher.appName
+        }
       }
 
       // Associate before launching so future Spaceballs resizes update the
@@ -161,9 +167,6 @@ public final class WorkspaceRestorer {
           spaceUUID: targetSpace.uuid,
           displayUUID: targetSpace.displayUUID,
           bundleIDs: Set(workspace.launchers.map(\.bundleID).filter { !$0.isEmpty })) ?? false
-
-      // Existing windows still need an explicit workspace-layout restore.
-      guard !missingLaunchers.isEmpty || hasWorkspaceLayout else { continue }
 
       // Switch to the space and ensure it has keyboard focus.
       // On multi-display, Launch Services opens apps on the display with
@@ -240,7 +243,7 @@ public final class WorkspaceRestorer {
       }
     }
 
-    progress?(workspacesWithLaunchers.count, workspacesWithLaunchers.count, "Done")
+    progress?(workspaces.count, workspaces.count, "Done")
 
     return RestoreSummary(
       spacesCreated: spacesCreated,

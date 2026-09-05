@@ -567,10 +567,12 @@ public class SpaceManager {
     defaultNames: [String], spaceNameStore: SpaceNameStoring,
     completion: @escaping (Int) -> Void
   ) {
-    spaceNameStore.pruneStaleNames(currentSpaces: getAllSpaces())
+    let spaces = getAllSpaces()
+    spaceNameStore.pruneStaleNames(currentSpaces: spaces)
 
-    let existingNames = Set(spaceNameStore.allCustomNames().values)
-    let missingNames = defaultNames.filter { !existingNames.contains($0) }
+    let missingNames = defaultNames.filter {
+      spaceNameStore.spaceWithCustomName($0, in: spaces) == nil
+    }
 
     guard !missingNames.isEmpty else {
       completion(0)
@@ -615,10 +617,12 @@ public class SpaceManager {
       throw SpaceCreateError.accessibilityNotTrusted
     }
 
-    spaceNameStore.pruneStaleNames(currentSpaces: getAllSpaces())
+    let spaces = getAllSpaces()
+    spaceNameStore.pruneStaleNames(currentSpaces: spaces)
 
-    let existingNames = Set(spaceNameStore.allCustomNames().values)
-    let missingNames = defaultNames.filter { !existingNames.contains($0) }
+    let missingNames = defaultNames.filter {
+      spaceNameStore.spaceWithCustomName($0, in: spaces) == nil
+    }
     guard !missingNames.isEmpty else { return 0 }
 
     let beforeUUIDs = Set(getAllSpaces().map(\.uuid))
