@@ -6,6 +6,88 @@ import Testing
 @Suite("Workspace Restoration Layout Integration")
 struct WorkspaceRestorerTests {
   @Test(
+    "Launcher diagnostics identify focus changes without logging launch payloads",
+    arguments: [true, false])
+  func launcherFocusDiagnostics(fails: Bool) throws {
+    let target = space(id: 101, uuid: "diagnostics")
+    var current = target
+    var frontmost = "com.example.before"
+    var logs: [String] = []
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 }, allSpaces: { [current] },
+      windowsBySpace: { [:] },
+      switchToSpace: { _ in current = target },
+      clickDesktop: { _ in frontmost = "com.apple.finder" },
+      executeLauncher: { _ in
+        current = space(id: 202, uuid: "other")
+        frontmost = "com.example.launched"
+        if fails { throw WorkspaceLauncherError.missingLaunchServicesBundleID }
+      },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget }, sleep: { _ in },
+      diagnosticsEnabled: { true }, frontmostApplication: { frontmost },
+      logDiagnostic: { logs.append($0) })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: makeNameStore([target.uuid: "Work"]), windowLayoutRestorer: nil, hooks: hooks)
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "workspace-id", name: "Work", path: "/private/path",
+          launchers: [
+            LauncherData(
+              label: "private-label",
+              steps: [
+                WorkspaceLauncherStep(
+                  action: .launchServices(.init(target: "$PATH", activates: true)))
+              ],
+              bundleID: "com.example.launched")
+          ])
+      ], defaultNames: ["Work"])
+    let before = try #require(logs.first { $0.contains("phase=before-launch") })
+    #expect(before.contains("workspace=workspace-id launcher=1 app=com.example.launched"))
+    #expect(before.contains("launchServices(activates=true)"))
+    #expect(before.contains("currentSpaces=[101@display-A]"))
+    #expect(before.contains("frontmost=com.apple.finder"))
+    let after = try #require(
+      logs.first {
+        $0.contains(fails ? "phase=launcher-failed" : "phase=after-execute")
+      })
+    #expect(after.contains("currentSpaces=[202@display-A]"))
+    #expect(after.contains("frontmost=com.example.launched"))
+    #expect(
+      logs.contains {
+        $0.contains("phase=before-refocus") && $0.contains("launcher=1")
+          && $0.contains("currentSpaces=[202@display-A]")
+      })
+    #expect(logs.last?.contains("currentSpaces=[101@display-A]") == true)
+    #expect(!logs.joined().contains("/private/path"))
+    #expect(!logs.joined().contains("private-label"))
+  }
+
+  @Test("Disabled launcher diagnostics do not read frontmost app state or emit entries")
+  func launcherDiagnosticsDisabled() throws {
+    let target = space(id: 101, uuid: "diagnostics-off")
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 }, allSpaces: { [target] }, windowsBySpace: { [:] },
+      switchToSpace: { _ in }, clickDesktop: { _ in }, executeLauncher: { _ in },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget }, sleep: { _ in },
+      diagnosticsEnabled: { false },
+      frontmostApplication: {
+        Issue.record("Unexpected focus read")
+        return ""
+      },
+      logDiagnostic: { _ in Issue.record("Unexpected diagnostic") })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: makeNameStore([target.uuid: "Work"]), windowLayoutRestorer: nil, hooks: hooks)
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "work", name: "Work", path: nil,
+          launchers: [LauncherData(label: "", type: .open, command: "Safari")])
+      ],
+      defaultNames: ["Work"])
+  }
+
+  @Test(
     "Reactivating a named workspace reuses its Space and opens only missing apps",
     arguments: ["Work", "work", "101", "Desktop 1"])
   func reactivatePartialWorkspace(name: String) throws {

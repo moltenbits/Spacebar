@@ -39,6 +39,9 @@ struct WorkspaceRestorerHooks {
   var bundleIDForPID: (Int) -> String? = { _ in nil }
   var relocateWindow: (Int, UInt64) throws -> Bool = { _, _ in false }
   var sleep: (TimeInterval) -> Void
+  var diagnosticsEnabled: () -> Bool = { Diagnostics.enabled }
+  var frontmostApplication: () -> String = { "unknown" }
+  var logDiagnostic: (String) -> Void = { Diagnostics.log("workspace-restore", $0) }
 }
 
 /// Orchestrates workspace restoration: creates spaces, switches to each,
@@ -84,7 +87,11 @@ public final class WorkspaceRestorer {
           targetSpaceID: targetSpaceID,
           activateAfterMove: false)
       },
-      sleep: { Thread.sleep(forTimeInterval: $0) })
+      sleep: { Thread.sleep(forTimeInterval: $0) },
+      frontmostApplication: {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return "none" }
+        return "\(app.bundleIdentifier ?? "unknown") pid=\(app.processIdentifier)"
+      })
     self.init(
       spaceNameStore: spaceNameStore,
       windowLayoutRestorer: windowLayoutRestorer,
@@ -173,7 +180,8 @@ public final class WorkspaceRestorer {
       // keyboard focus, so we click on the target display's desktop after
       // switching to ensure apps open on the correct display.
       do {
-        try focusTargetSpace(spaceID, forceSwitch: true)
+        try focusTargetSpace(
+          spaceID, forceSwitch: true, context: "workspace=\(workspace.id) initial")
       } catch {
         errors.append((workspace.name, "", "Failed to switch: \(error.localizedDescription)"))
         continue
@@ -190,8 +198,12 @@ public final class WorkspaceRestorer {
         }
         let request = launcher.resolvedLaunchRequest(
           path: workspace.path, name: workspace.name)
+        let context = launcherDiagnosticContext(
+          workspace: workspace, launcher: launcher, index: launcherIndex)
+        logState("before-launch", targetSpaceID: spaceID, context: context)
         do {
           try hooks.executeLauncher(request)
+          logState("after-execute", targetSpaceID: spaceID, context: context)
           appsLaunched += 1
           if launcher.bundleID.isEmpty {
             hooks.sleep(1.0)
@@ -202,7 +214,9 @@ public final class WorkspaceRestorer {
               preexistingWindowIDs: preexistingWindowIDs,
               allowsExistingWindow: launcher.allowsExistingWindow)
           }
+          logState("after-placement", targetSpaceID: spaceID, context: context)
         } catch {
+          logState("launcher-failed", targetSpaceID: spaceID, context: context)
           errors.append(
             (
               workspace.name,
@@ -214,7 +228,7 @@ public final class WorkspaceRestorer {
 
         guard launcherIndex < missingLaunchers.count - 1 else { continue }
         do {
-          try focusTargetSpace(spaceID, forceSwitch: false)
+          try focusTargetSpace(spaceID, forceSwitch: false, context: context)
         } catch {
           errors.append((workspace.name, "", "Failed to refocus: \(error.localizedDescription)"))
           focusFailed = true
@@ -226,9 +240,13 @@ public final class WorkspaceRestorer {
       // Launching or activating an already-running app can switch macOS back
       // to that app's existing Space. Return to the workspace before applying
       // its layout, even after the final launcher.
-      if !missingLaunchers.isEmpty {
+      if let lastLauncher = missingLaunchers.last {
         do {
-          try focusTargetSpace(spaceID, forceSwitch: false)
+          try focusTargetSpace(
+            spaceID, forceSwitch: false,
+            context: launcherDiagnosticContext(
+              workspace: workspace, launcher: lastLauncher,
+              index: missingLaunchers.count - 1))
         } catch {
           errors.append((workspace.name, "", "Failed to refocus: \(error.localizedDescription)"))
           continue
@@ -252,7 +270,32 @@ public final class WorkspaceRestorer {
     )
   }
 
-  private func focusTargetSpace(_ spaceID: UInt64, forceSwitch: Bool) throws {
+  private func launcherDiagnosticContext(
+    workspace: WorkspaceConfigData, launcher: LauncherData, index: Int
+  ) -> String {
+    let steps = launcher.steps.map { step in
+      if case .launchServices(let configuration) = step.action {
+        return "launchServices(activates=\(configuration.activates))"
+      }
+      return step.type.rawValue
+    }.joined(separator: ",")
+    // IDs and step types only: do not expose commands, paths, arguments, or environment values.
+    return
+      "workspace=\(workspace.id) launcher=\(index + 1) app=\(launcher.bundleID.isEmpty ? "unknown" : launcher.bundleID) steps=[\(steps)]"
+  }
+
+  private func logState(_ phase: String, targetSpaceID: UInt64, context: String) {
+    guard hooks.diagnosticsEnabled() else { return }
+    let current = hooks.allSpaces().filter(\.isCurrent).map {
+      "\($0.id)@\($0.displayUUID)"
+    }.sorted().joined(separator: ",")
+    hooks.logDiagnostic(
+      "phase=\(phase) \(context) targetSpace=\(targetSpaceID) currentSpaces=[\(current)] frontmost=\(hooks.frontmostApplication())"
+    )
+  }
+
+  private func focusTargetSpace(_ spaceID: UInt64, forceSwitch: Bool, context: String) throws {
+    logState("before-refocus", targetSpaceID: spaceID, context: context)
     let isCurrent = hooks.allSpaces().contains { $0.id == spaceID && $0.isCurrent }
     if forceSwitch || !isCurrent {
       if !forceSwitch {
@@ -262,8 +305,10 @@ public final class WorkspaceRestorer {
       try hooks.switchToSpace(spaceID)
       hooks.sleep(2.0)  // Let focus and any fallback transition settle
     }
+    logState("before-desktop-click", targetSpaceID: spaceID, context: context)
     hooks.clickDesktop(spaceID)
     hooks.sleep(0.5)
+    logState("after-desktop-click", targetSpaceID: spaceID, context: context)
   }
 
   private func waitForLaunchedWindowPlacement(
