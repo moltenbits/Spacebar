@@ -189,7 +189,17 @@ struct LauncherDetailView: View {
             .font(.headline)
 
           Text(
-            "Steps run from top to bottom. A failed step stops the remaining pipeline. Use $PATH, $NAME, and $PROFILE in configurable values."
+            "Steps run from top to bottom. Steps that wait stop the pipeline on failure; background shell steps continue immediately. Use $PATH, $NAME, and $PROFILE in configurable values."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+
+          Toggle(
+            "Allow relocating an existing window",
+            isOn: $settings.workspaces[workspaceIndex].launchers[launcherIndex].allowsExistingWindow
+          )
+          Text(
+            "Turn off when this launcher must create a new window, such as the iTerm and Safari templates."
           )
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -326,7 +336,15 @@ private struct LauncherStepEditor: View {
       commandEditor(
         title: "Script", text: stringValue(for: .applescript), minimumHeight: 140)
     case .shell:
-      commandEditor(title: "Command", text: stringValue(for: .shell), minimumHeight: 100)
+      VStack(alignment: .leading, spacing: 8) {
+        commandEditor(title: "Command", text: stringValue(for: .shell), minimumHeight: 100)
+        Toggle("Wait for command to finish", isOn: shellWaitsForExit)
+        Text(
+          "Turn off for commands that stay running with the app. Later steps will start immediately, and command failures will not stop the pipeline."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
     case .openApplication:
       VStack(alignment: .leading, spacing: 4) {
         Text("Application Name").font(.caption).foregroundStyle(.secondary)
@@ -351,7 +369,7 @@ private struct LauncherStepEditor: View {
     Binding(
       get: {
         switch step.action {
-        case .shell(let command): command
+        case .shell(let command, _): command
         case .appleScript(let source): source
         case .openApplication(let applicationName): applicationName
         case .launchServices: ""
@@ -359,11 +377,23 @@ private struct LauncherStepEditor: View {
       },
       set: { value in
         switch type {
-        case .shell: step.action = .shell(value)
+        case .shell: step.action = .shell(value, waitsForExit: shellWaitsForExit.wrappedValue)
         case .applescript: step.action = .appleScript(value)
         case .open: step.action = .openApplication(value)
         case .launchServices: break
         }
+      })
+  }
+
+  private var shellWaitsForExit: Binding<Bool> {
+    Binding(
+      get: {
+        guard case .shell(_, let waits) = step.action else { return true }
+        return waits
+      },
+      set: { waits in
+        guard case .shell(let command, _) = step.action else { return }
+        step.action = .shell(command, waitsForExit: waits)
       })
   }
 

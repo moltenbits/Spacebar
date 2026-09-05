@@ -5,6 +5,51 @@ import Testing
 
 @Suite("Workspace Launcher Execution")
 struct WorkspaceLauncherExecutorTests {
+  @Test("Real shell failures retain their exit status and stop later commands")
+  func realShellFailure() {
+    do {
+      try WorkspaceLauncherExecutor.live.execute(
+        WorkspaceLaunchRequest(
+          steps: [.shell("exit 7"), .shell("exit 9")], bundleID: ""))
+      Issue.record("Expected a shell failure")
+    } catch WorkspaceLauncherError.processFailed(let type, let status, _) {
+      #expect(type == "shell")
+      #expect(status == 7)
+    } catch {
+      Issue.record("Unexpected error: \(error)")
+    }
+  }
+
+  @Test("Shell preparation completes before later steps")
+  func shellPreparationWaits() throws {
+    var prepared = false
+    let executor = WorkspaceLauncherExecutor(
+      runProcess: { _, _, waits in
+        #expect(waits)
+        prepared = waits
+      },
+      openWithLaunchServices: { _ in #expect(prepared) })
+    try executor.execute(
+      WorkspaceLaunchRequest(
+        steps: [.shell("prepare-project"), .launchServices(.init())], bundleID: "example.App"))
+  }
+
+  @Test("A failed synchronous shell step stops the pipeline")
+  func shellFailureStopsPipeline() {
+    var opened = false
+    let executor = WorkspaceLauncherExecutor(
+      runProcess: { _, _, waits in
+        if waits { throw TestError.launchFailed }
+      },
+      openWithLaunchServices: { _ in opened = true })
+    #expect(throws: TestError.self) {
+      try executor.execute(
+        WorkspaceLaunchRequest(
+          steps: [.shell("exit 1"), .launchServices(.init())], bundleID: "example.App"))
+    }
+    #expect(!opened)
+  }
+
   @Test("Composed launchers execute each typed step in order")
   func composedLauncherOrder() throws {
     var events: [String] = []
@@ -244,7 +289,7 @@ struct WorkspaceLauncherExecutorTests {
 
     try executor.execute(
       WorkspaceLaunchRequest(
-        steps: [.shell("echo hello")], bundleID: ""))
+        steps: [.shell("echo hello", waitsForExit: false)], bundleID: ""))
 
     #expect(processCall?.executable.path == "/bin/zsh")
     #expect(processCall?.arguments == ["-c", "echo hello"])

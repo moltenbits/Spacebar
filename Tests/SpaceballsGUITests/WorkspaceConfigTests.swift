@@ -6,6 +6,46 @@ import Testing
 
 @Suite("Workspace Launcher Bundle IDs")
 struct WorkspaceConfigTests {
+  @Test("Legacy composed shell steps retain background behavior")
+  func legacyShellPolicy() throws {
+    let data = Data(#"{"type":"shell","command":"serve"}"#.utf8)
+    let action = try JSONDecoder().decode(WorkspaceLauncherAction.self, from: data)
+    #expect(action == .shell("serve", waitsForExit: false))
+  }
+
+  @Test("Launcher and shell policies round-trip and survive duplication", arguments: [true, false])
+  func executionPoliciesRoundTrip(policy: Bool) throws {
+    let original = AppLauncher(
+      allowsExistingWindow: policy,
+      steps: [WorkspaceLauncherStep(action: .shell("serve", waitsForExit: policy))])
+    let decoded = try JSONDecoder().decode(AppLauncher.self, from: JSONEncoder().encode(original))
+    #expect(decoded == original)
+    #expect(decoded.steps[0].duplicated().action == original.steps[0].action)
+  }
+
+  @Test("Adding AppleScript does not change an existing launcher's window policy")
+  func addingScriptPreservesReuse() {
+    var launcher = LauncherTemplate.tower.launcher
+    launcher.steps.append(WorkspaceLauncherStep(action: .appleScript("return 1")))
+    #expect(launcher.allowsExistingWindow)
+    for template in [LauncherTemplate.iterm, .safari, .safariProfile] {
+      #expect(!template.launcher.allowsExistingWindow)
+    }
+    #expect(LauncherTemplate.genericShell.launcher.steps[0].action == .shell("echo \"$PATH\""))
+  }
+
+  @Test("Legacy window policy is inferred once and then persisted")
+  func legacyWindowPolicy() throws {
+    for type in [LaunchType.applescript, .shell, .open] {
+      let launcher = try decodeLegacyLauncher(
+        type: type, appName: "Custom", bundleID: "example.Custom", command: "custom")
+      #expect(launcher.allowsExistingWindow == (type != .applescript))
+      let encoded = try JSONEncoder().encode(launcher)
+      let decoded = try JSONDecoder().decode(AppLauncher.self, from: encoded)
+      #expect(decoded == launcher)
+    }
+  }
+
   @Test("Window-specific templates explicitly compose Launch Services and AppleScript")
   func windowSpecificTemplatesAreComposed() {
     let iterm = LauncherTemplate.iterm.launcher
@@ -253,7 +293,7 @@ struct WorkspaceConfigTests {
       command: "idea --line 42 \"$PATH\"")
 
     #expect(decoded.steps.map(\.type) == [.shell])
-    #expect(decoded.steps.first?.action == .shell("idea --line 42 \"$PATH\""))
+    #expect(decoded.steps.first?.action == .shell("idea --line 42 \"$PATH\"", waitsForExit: false))
   }
 
   @Test("Stock Safari scripts remove their embedded shell launch")

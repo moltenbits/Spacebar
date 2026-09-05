@@ -1216,7 +1216,8 @@ extension AppDelegate: KeyInterceptorDelegate {
                 label: l.label,
                 steps: l.steps,
                 appName: l.appName,
-                bundleID: l.bundleID)
+                bundleID: l.bundleID,
+                allowsExistingWindow: l.allowsExistingWindow)
             }
           )
         }

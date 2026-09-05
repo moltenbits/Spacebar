@@ -169,6 +169,7 @@ struct SpacesPane: View {
           label: $0.label,
           appName: $0.appName,
           bundleID: $0.bundleID,
+          allowsExistingWindow: $0.allowsExistingWindow,
           steps: $0.steps.map { $0.duplicated() })
       }
     )

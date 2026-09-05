@@ -5,6 +5,56 @@ import Testing
 
 @Suite("Workspace Restoration Layout Integration")
 struct WorkspaceRestorerTests {
+  @Test(
+    "Window reuse follows launcher policy even with an AppleScript step", arguments: [true, false])
+  func composedWindowReusePolicy(allowsExisting: Bool) throws {
+    let target = space(id: 101, uuid: "reuse-policy")
+    var observed: Bool?
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 },
+      allSpaces: { [target] },
+      windowsBySpace: { [:] },
+      switchToSpace: { _ in },
+      clickDesktop: { _ in },
+      executeLauncher: { _ in },
+      relocateFocusedWindow: { _, _, _, allowsExistingWindow in
+        observed = allowsExistingWindow
+        return .onTarget
+      },
+      sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: makeNameStore([target.uuid: "Work"]), windowLayoutRestorer: nil, hooks: hooks)
+    _ = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "work", name: "Work", path: nil,
+          launchers: [
+            LauncherData(
+              label: "Tower",
+              steps: [
+                WorkspaceLauncherStep(action: .launchServices(.init(target: "$PATH"))),
+                WorkspaceLauncherStep(action: .appleScript("return 1")),
+              ],
+              bundleID: "com.fournova.Tower3", allowsExistingWindow: allowsExisting)
+          ])
+      ],
+      defaultNames: ["Work"])
+    #expect(observed == allowsExisting)
+  }
+
+  @Test("Resolving shell variables preserves the wait policy", arguments: [true, false])
+  func shellWaitPolicySurvivesResolution(waits: Bool) {
+    let launcher = LauncherData(
+      label: "",
+      steps: [
+        WorkspaceLauncherStep(action: .shell("echo $NAME", waitsForExit: waits))
+      ])
+    #expect(
+      launcher.resolvedLaunchRequest(path: nil, name: "Work").steps == [
+        .shell("echo Work", waitsForExit: waits)
+      ])
+  }
+
   private func makeNameStore(_ names: [String: String]) -> SpaceNameStore {
     let suite = "WorkspaceRestorerTests-" + UUID().uuidString
     let defaults = UserDefaults(suiteName: suite)!

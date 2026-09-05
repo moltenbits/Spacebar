@@ -34,9 +34,9 @@ struct WorkspaceLauncherExecutor {
     }
     for step in request.steps {
       switch step {
-      case .shell(let command):
+      case .shell(let command, let waitsForExit):
         try runProcess(
-          URL(fileURLWithPath: "/bin/zsh"), ["-c", command], false)
+          URL(fileURLWithPath: "/bin/zsh"), ["-c", command], waitsForExit)
       case .appleScript(let source):
         try runProcess(
           URL(fileURLWithPath: "/usr/bin/osascript"), ["-e", source], true)
@@ -122,7 +122,12 @@ struct WorkspaceLauncherExecutor {
 
     let output = String(decoding: outputData, as: UTF8.self)
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    let type = executable.lastPathComponent == "osascript" ? "applescript" : "open"
+    let type: String
+    switch executable.lastPathComponent {
+    case "osascript": type = "applescript"
+    case "zsh": type = "shell"
+    default: type = "open"
+    }
     throw WorkspaceLauncherError.processFailed(
       type: type,
       status: process.terminationStatus,

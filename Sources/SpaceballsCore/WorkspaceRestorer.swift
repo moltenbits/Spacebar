@@ -197,10 +197,7 @@ public final class WorkspaceRestorer {
               bundleID: launcher.bundleID,
               targetSpaceID: spaceID,
               preexistingWindowIDs: preexistingWindowIDs,
-              // Compositions containing AppleScript explicitly create a new
-              // window. Shell/open/Launch Services-only launchers may
-              // legitimately reactivate an existing project window.
-              allowsExistingWindow: !launcher.steps.contains { $0.type == .applescript })
+              allowsExistingWindow: launcher.allowsExistingWindow)
           }
         } catch {
           errors.append(
@@ -449,17 +446,20 @@ public struct LauncherData {
   public let steps: [WorkspaceLauncherStep]
   public let appName: String
   public let bundleID: String
+  public let allowsExistingWindow: Bool
 
   public init(
     label: String,
     steps: [WorkspaceLauncherStep],
     appName: String = "",
-    bundleID: String = ""
+    bundleID: String = "",
+    allowsExistingWindow: Bool = true
   ) {
     self.label = label
     self.steps = steps
     self.appName = appName
     self.bundleID = bundleID
+    self.allowsExistingWindow = allowsExistingWindow
   }
 
   public init(
@@ -472,10 +472,14 @@ public struct LauncherData {
     self.init(
       label: label,
       steps: [
-        WorkspaceLauncherStep(action: WorkspaceLauncherAction(type: type, value: command))
+        WorkspaceLauncherStep(
+          action: type == .shell
+            ? .shell(command, waitsForExit: false)
+            : WorkspaceLauncherAction(type: type, value: command))
       ],
       appName: appName,
-      bundleID: bundleID)
+      bundleID: bundleID,
+      allowsExistingWindow: type != .applescript)
   }
 
   private func resolvedValue(_ value: String, path: String?, name: String) -> String {
@@ -501,8 +505,8 @@ public struct LauncherData {
     WorkspaceLaunchRequest(
       steps: steps.map { step in
         switch step.action {
-        case .shell(let command):
-          return .shell(resolvedValue(command, path: path, name: name))
+        case .shell(let command, let waitsForExit):
+          return .shell(resolvedValue(command, path: path, name: name), waitsForExit: waitsForExit)
         case .appleScript(let source):
           return .appleScript(resolvedValue(source, path: path, name: name))
         case .openApplication(let applicationName):

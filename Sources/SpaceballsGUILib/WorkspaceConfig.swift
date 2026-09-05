@@ -89,18 +89,21 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
   public var appName: String
   /// Stable application identity used to match saved window layouts.
   public var bundleID: String
+  public var allowsExistingWindow: Bool
 
   public init(
     id: UUID = UUID(),
     label: String = "",
     appName: String = "",
     bundleID: String = "",
+    allowsExistingWindow: Bool = true,
     steps: [WorkspaceLauncherStep]
   ) {
     self.id = id
     self.label = label
     self.appName = appName
     self.bundleID = bundleID
+    self.allowsExistingWindow = allowsExistingWindow
     self.steps = steps
   }
 
@@ -117,6 +120,7 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
       label: label,
       appName: appName,
       bundleID: bundleID,
+      allowsExistingWindow: type != .applescript,
       steps: [Self.step(type: type, command: command)])
   }
 
@@ -137,6 +141,10 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
       steps = Self.migratedSteps(
         command: legacyCommand, type: legacyType, bundleID: bundleID)
     }
+    // Only old saved launchers infer policy from their former execution behavior.
+    allowsExistingWindow =
+      try c.decodeIfPresent(Bool.self, forKey: .allowsExistingWindow)
+      ?? !steps.contains { $0.type == .applescript }
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -146,10 +154,11 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
     try c.encode(steps, forKey: .steps)
     try c.encode(appName, forKey: .appName)
     try c.encode(bundleID, forKey: .bundleID)
+    try c.encode(allowsExistingWindow, forKey: .allowsExistingWindow)
   }
 
   private enum CodingKeys: String, CodingKey {
-    case id, label, steps, type, command, appName, bundleID
+    case id, label, steps, type, command, appName, bundleID, allowsExistingWindow
   }
 
   private static func knownBundleID(forAppName appName: String) -> String {
@@ -187,7 +196,7 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
   public var usesProfileVariable: Bool {
     steps.contains { step in
       switch step.action {
-      case .shell(let command), .appleScript(let command), .openApplication(let command):
+      case .shell(let command, _), .appleScript(let command), .openApplication(let command):
         return command.contains("$PROFILE") || command.contains("${PROFILE}")
       case .launchServices(let configuration):
         let values =
@@ -216,7 +225,10 @@ public struct AppLauncher: Codable, Equatable, Identifiable {
   }
 
   private static func step(type: LaunchType, command: String) -> WorkspaceLauncherStep {
-    WorkspaceLauncherStep(action: WorkspaceLauncherAction(type: type, value: command))
+    WorkspaceLauncherStep(
+      action: type == .shell
+        ? .shell(command, waitsForExit: false)
+        : WorkspaceLauncherAction(type: type, value: command))
   }
 }
 
@@ -290,6 +302,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         label: "",
         appName: "iTerm",
         bundleID: "com.googlecode.iterm2",
+        allowsExistingWindow: false,
         steps: [
           WorkspaceLauncherStep(
             action: .launchServices(
@@ -324,6 +337,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         label: "",
         appName: "Safari",
         bundleID: "com.apple.Safari",
+        allowsExistingWindow: false,
         steps: [
           WorkspaceLauncherStep(
             action: .launchServices(
@@ -336,6 +350,7 @@ public enum LauncherTemplate: String, CaseIterable, Identifiable {
         label: "$NAME",
         appName: "Safari",
         bundleID: "com.apple.Safari",
+        allowsExistingWindow: false,
         steps: [
           WorkspaceLauncherStep(
             action: .launchServices(

@@ -71,7 +71,7 @@ public struct WorkspaceLaunchServicesConfiguration: Codable, Equatable, Sendable
 }
 
 public enum WorkspaceLauncherAction: Equatable, Sendable {
-  case shell(String)
+  case shell(String, waitsForExit: Bool = true)
   case appleScript(String)
   case openApplication(String)
   case launchServices(WorkspaceLaunchServicesConfiguration)
@@ -127,6 +127,7 @@ extension WorkspaceLauncherAction: Codable {
     case source
     case applicationName
     case configuration
+    case waitsForExit
   }
 
   public init(from decoder: Decoder) throws {
@@ -134,7 +135,9 @@ extension WorkspaceLauncherAction: Codable {
     let type = try container.decode(WorkspaceLaunchType.self, forKey: .type)
     switch type {
     case .shell:
-      self = .shell(try container.decodeIfPresent(String.self, forKey: .command) ?? "")
+      self = .shell(
+        try container.decodeIfPresent(String.self, forKey: .command) ?? "",
+        waitsForExit: try container.decodeIfPresent(Bool.self, forKey: .waitsForExit) ?? false)
     case .applescript:
       self = .appleScript(try container.decodeIfPresent(String.self, forKey: .source) ?? "")
     case .open:
@@ -152,8 +155,9 @@ extension WorkspaceLauncherAction: Codable {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(type, forKey: .type)
     switch self {
-    case .shell(let command):
+    case .shell(let command, let waitsForExit):
       try container.encode(command, forKey: .command)
+      try container.encode(waitsForExit, forKey: .waitsForExit)
     case .appleScript(let source):
       try container.encode(source, forKey: .source)
     case .openApplication(let applicationName):

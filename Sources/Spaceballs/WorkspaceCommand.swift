@@ -53,7 +53,8 @@ struct RestoreWorkspaceCommand: ParsableCommand {
             label: l.label,
             steps: l.steps,
             appName: l.appName,
-            bundleID: l.bundleID)
+            bundleID: l.bundleID,
+            allowsExistingWindow: l.allowsExistingWindow)
         }
       )
     }
@@ -119,7 +120,7 @@ struct ListWorkspacesCommand: ParsableCommand {
           let typeIcon: String
           let detail: String
           switch step.action {
-          case .shell(let command):
+          case .shell(let command, _):
             typeIcon = "⌘"
             detail = command
           case .appleScript(let source):
