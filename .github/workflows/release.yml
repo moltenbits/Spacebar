@@ -149,6 +149,15 @@ jobs:
             # Relaunch after install/upgrade (-g: without stealing focus), so
             # an upgrade is quit -> replace -> relaunch with no manual step.
             postflight do
+              # Local Dev builds have a separate identity and are not stopped
+              # by the release app's uninstall hook. No match is normal.
+              result = system_command "/usr/bin/pkill",
+                                      args: ["-INT", "-f", '/Spaceballs Dev\.app/Contents/MacOS/spaceballs([[:space:]]|$)'],
+                                      must_succeed: false
+              unless [0, 1].include?(result.exit_status)
+                raise "Could not stop Spaceballs Dev (pkill exit #{result.exit_status})"
+              end
+
               system_command "/usr/bin/open",
                              args: ["-g", "-a", "#{appdir}/Spaceballs.app"]
             end
