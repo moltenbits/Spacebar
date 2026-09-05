@@ -6,6 +6,52 @@ import Testing
 @Suite("Workspace Restoration Layout Integration")
 struct WorkspaceRestorerTests {
   @Test(
+    "Focus changes during settling are repaired before launching, or fail closed",
+    arguments: [true, false])
+  func focusChangesDuringSettling(recovers: Bool) throws {
+    let target = space(id: 101, uuid: "focus-race")
+    let other = space(id: 202, uuid: "other")
+    var current = target
+    var clicks = 0
+    var launches = 0
+    let hooks = WorkspaceRestorerHooks(
+      createDefaultSpaces: { _, _ in 0 },
+      allSpaces: {
+        [
+          SpaceInfo(
+            id: target.id, uuid: target.uuid, type: .desktop,
+            displayUUID: target.displayUUID, isCurrent: current.id == target.id),
+          SpaceInfo(
+            id: other.id, uuid: other.uuid, type: .desktop,
+            displayUUID: other.displayUUID, isCurrent: current.id == other.id),
+        ]
+      },
+      windowsBySpace: { [:] }, switchToSpace: { _ in current = target },
+      focusDisplay: { _ in
+        clicks += 1
+        if clicks == 1 || !recovers { current = other }
+      },
+      executeLauncher: { _ in
+        #expect(current.id == target.id)
+        launches += 1
+      },
+      relocateFocusedWindow: { _, _, _, _ in .onTarget }, sleep: { _ in })
+    let restorer = WorkspaceRestorer(
+      spaceNameStore: makeNameStore([target.uuid: "Work"]),
+      windowLayoutRestorer: nil, hooks: hooks)
+    let result = try restorer.restoreSync(
+      workspaces: [
+        WorkspaceConfigData(
+          id: "work", name: "Work", path: nil,
+          launchers: [LauncherData(label: "", type: .open, command: "Safari")])
+      ],
+      defaultNames: ["Work"])
+    #expect(launches == (recovers ? 1 : 0))
+    #expect(result.errors.isEmpty == recovers)
+    #expect(clicks <= 3)
+  }
+
+  @Test(
     "Launcher diagnostics identify focus changes without logging launch payloads",
     arguments: [true, false])
   func launcherFocusDiagnostics(fails: Bool) throws {
@@ -17,7 +63,7 @@ struct WorkspaceRestorerTests {
       createDefaultSpaces: { _, _ in 0 }, allSpaces: { [current] },
       windowsBySpace: { [:] },
       switchToSpace: { _ in current = target },
-      clickDesktop: { _ in frontmost = "com.apple.finder" },
+      focusDisplay: { _ in frontmost = "com.apple.finder" },
       executeLauncher: { _ in
         current = space(id: 202, uuid: "other")
         frontmost = "com.example.launched"
@@ -68,7 +114,7 @@ struct WorkspaceRestorerTests {
     let target = space(id: 101, uuid: "diagnostics-off")
     let hooks = WorkspaceRestorerHooks(
       createDefaultSpaces: { _, _ in 0 }, allSpaces: { [target] }, windowsBySpace: { [:] },
-      switchToSpace: { _ in }, clickDesktop: { _ in }, executeLauncher: { _ in },
+      switchToSpace: { _ in }, focusDisplay: { _ in }, executeLauncher: { _ in },
       relocateFocusedWindow: { _, _, _, _ in .onTarget }, sleep: { _ in },
       diagnosticsEnabled: { false },
       frontmostApplication: {
@@ -111,7 +157,7 @@ struct WorkspaceRestorerTests {
       allSpaces: { [other, target] },
       windowsBySpace: { [target.id: [terminal], other.id: [safariElsewhere]] },
       switchToSpace: { switched.append($0) },
-      clickDesktop: { #expect($0 == target.id) },
+      focusDisplay: { #expect($0 == target.id) },
       executeLauncher: { launched.append($0.bundleID) },
       relocateFocusedWindow: { _, spaceID, _, _ in
         #expect(spaceID == target.id)
@@ -158,7 +204,7 @@ struct WorkspaceRestorerTests {
       allSpaces: { [target] },
       windowsBySpace: { [target.id: [existing]] },
       switchToSpace: { switched.append($0) },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { _ in Issue.record("Must not relaunch an existing app") },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
@@ -186,7 +232,7 @@ struct WorkspaceRestorerTests {
     let hooks = WorkspaceRestorerHooks(
       createDefaultSpaces: { _, _ in 0 },
       allSpaces: { [target] }, windowsBySpace: { [target.id: [existing]] },
-      switchToSpace: { _ in }, clickDesktop: { _ in },
+      switchToSpace: { _ in }, focusDisplay: { _ in },
       executeLauncher: { _ in launches += 1 },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       bundleIDForPID: { _ in matchesBundle ? "com.apple.Safari" : "com.example.other" },
@@ -222,7 +268,7 @@ struct WorkspaceRestorerTests {
         return 1
       },
       allSpaces: { spaces }, windowsBySpace: { [:] },
-      switchToSpace: { switched.append($0) }, clickDesktop: { _ in },
+      switchToSpace: { switched.append($0) }, focusDisplay: { _ in },
       executeLauncher: { _ in Issue.record("No launchers configured") },
       relocateFocusedWindow: { _, _, _, _ in .onTarget }, sleep: { _ in })
     let restorer = WorkspaceRestorer(
@@ -244,7 +290,7 @@ struct WorkspaceRestorerTests {
     let hooks = WorkspaceRestorerHooks(
       createDefaultSpaces: { _, _ in 0 }, allSpaces: { [other] }, windowsBySpace: { [:] },
       switchToSpace: { _ in Issue.record("Must not switch to an unrelated Space") },
-      clickDesktop: { _ in }, executeLauncher: { _ in Issue.record("Must not launch") },
+      focusDisplay: { _ in }, executeLauncher: { _ in Issue.record("Must not launch") },
       relocateFocusedWindow: { _, _, _, _ in .onTarget }, sleep: { _ in })
     let restorer = WorkspaceRestorer(
       spaceNameStore: makeNameStore([:]), windowLayoutRestorer: nil, hooks: hooks)
@@ -269,7 +315,7 @@ struct WorkspaceRestorerTests {
       allSpaces: { [target] },
       windowsBySpace: { [:] },
       switchToSpace: { _ in },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { _ in },
       relocateFocusedWindow: { _, _, _, allowsExistingWindow in
         observed = allowsExistingWindow
@@ -357,7 +403,7 @@ struct WorkspaceRestorerTests {
       allSpaces: { [target] },
       windowsBySpace: { [:] },
       switchToSpace: { _ in },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { _ in launched = true },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
@@ -412,7 +458,7 @@ struct WorkspaceRestorerTests {
       allSpaces: { [target] },
       windowsBySpace: { [target.id: [existing]] },
       switchToSpace: { _ in switched = true },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { _ in launched = true },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
@@ -461,7 +507,7 @@ struct WorkspaceRestorerTests {
       allSpaces: { [first, second] },
       windowsBySpace: { [:] },
       switchToSpace: { _ in },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { _ in },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
@@ -515,7 +561,7 @@ struct WorkspaceRestorerTests {
         switchTargets.append(target)
         currentSpaceID = target
       },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { request in
         #expect(currentSpaceID == targetID)
         guard let step = request.steps.first else { return }
@@ -584,7 +630,7 @@ struct WorkspaceRestorerTests {
       allSpaces: { [target] },
       windowsBySpace: { [:] },
       switchToSpace: { _ in },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { capturedRequest = $0 },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
@@ -624,7 +670,7 @@ struct WorkspaceRestorerTests {
       allSpaces: { [target] },
       windowsBySpace: { [:] },
       switchToSpace: { _ in },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { capturedRequest = $0 },
       relocateFocusedWindow: { _, _, _, _ in .onTarget },
       sleep: { _ in })
@@ -768,7 +814,7 @@ struct WorkspaceRestorerTests {
         return windows
       },
       switchToSpace: { _ in },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { _ in launched = true },
       relocateFocusedWindow: { _, _, _, _ in
         focusedWindowAttempts += 1
@@ -829,7 +875,7 @@ struct WorkspaceRestorerTests {
         return launched ? [existingWindow, newWindow] : [existingWindow]
       },
       switchToSpace: { _ in },
-      clickDesktop: { _ in },
+      focusDisplay: { _ in },
       executeLauncher: { _ in launched = true },
       relocateFocusedWindow: { _, _, _, _ in
         focusedWindowAttempts += 1

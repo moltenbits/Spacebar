@@ -33,7 +33,7 @@ struct WorkspaceRestorerHooks {
   var windowsBySpace: () -> [UInt64: [WindowInfo]]
   var launcherWindows: (String) -> [WorkspaceLauncherWindow] = { _ in [] }
   var switchToSpace: (UInt64) throws -> Void
-  var clickDesktop: (UInt64) -> Void
+  var focusDisplay: (UInt64) throws -> Void
   var executeLauncher: (WorkspaceLaunchRequest) throws -> Void
   var relocateFocusedWindow: (String, UInt64, Set<Int>, Bool) throws -> WorkspaceLauncherPlacement
   var bundleIDForPID: (Int) -> String? = { _ in nil }
@@ -67,7 +67,7 @@ public final class WorkspaceRestorer {
         Self.accessibilityWindows(bundleID: bundleID, spaceManager: spaceManager)
       },
       switchToSpace: { try spaceManager.switchToSpace(id: $0) },
-      clickDesktop: { spaceManager.clickDesktopOnDisplay(forSpaceID: $0) },
+      focusDisplay: { try spaceManager.focusDisplayForWorkspace(spaceID: $0) },
       executeLauncher: { try WorkspaceLauncherExecutor.live.execute($0) },
       relocateFocusedWindow: {
         bundleID, targetSpaceID, preexistingWindowIDs, allowsExistingWindow in
@@ -176,9 +176,8 @@ public final class WorkspaceRestorer {
           bundleIDs: Set(workspace.launchers.map(\.bundleID).filter { !$0.isEmpty })) ?? false
 
       // Switch to the space and ensure it has keyboard focus.
-      // On multi-display, Launch Services opens apps on the display with
-      // keyboard focus, so we click on the target display's desktop after
-      // switching to ensure apps open on the correct display.
+      // On multi-display, establish focus on the target display without
+      // blindly clicking through whichever app happens to cover its center.
       do {
         try focusTargetSpace(
           spaceID, forceSwitch: true, context: "workspace=\(workspace.id) initial")
@@ -200,8 +199,11 @@ public final class WorkspaceRestorer {
           path: workspace.path, name: workspace.name)
         let context = launcherDiagnosticContext(
           workspace: workspace, launcher: launcher, index: launcherIndex)
-        logState("before-launch", targetSpaceID: spaceID, context: context)
         do {
+          if !hooks.allSpaces().contains(where: { $0.id == spaceID && $0.isCurrent }) {
+            try focusTargetSpace(spaceID, forceSwitch: false, context: context)
+          }
+          logState("before-launch", targetSpaceID: spaceID, context: context)
           try hooks.executeLauncher(request)
           logState("after-execute", targetSpaceID: spaceID, context: context)
           appsLaunched += 1
@@ -295,20 +297,24 @@ public final class WorkspaceRestorer {
   }
 
   private func focusTargetSpace(_ spaceID: UInt64, forceSwitch: Bool, context: String) throws {
-    logState("before-refocus", targetSpaceID: spaceID, context: context)
-    let isCurrent = hooks.allSpaces().contains { $0.id == spaceID && $0.isCurrent }
-    if forceSwitch || !isCurrent {
-      if !forceSwitch {
-        Diagnostics.log(
-          "workspace-restore", "launcher changed active Space; refocusing space=\(spaceID)")
+    for attempt in 0..<3 {
+      logState("before-refocus", targetSpaceID: spaceID, context: context)
+      let isCurrent = hooks.allSpaces().contains { $0.id == spaceID && $0.isCurrent }
+      if (forceSwitch && attempt == 0) || !isCurrent {
+        if !forceSwitch {
+          Diagnostics.log(
+            "workspace-restore", "launcher changed active Space; refocusing space=\(spaceID)")
+        }
+        try hooks.switchToSpace(spaceID)
+        hooks.sleep(2.0)  // Let focus and any fallback transition settle
       }
-      try hooks.switchToSpace(spaceID)
-      hooks.sleep(2.0)  // Let focus and any fallback transition settle
+      logState("before-display-focus", targetSpaceID: spaceID, context: context)
+      try hooks.focusDisplay(spaceID)
+      hooks.sleep(0.5)
+      logState("after-display-focus", targetSpaceID: spaceID, context: context)
+      if hooks.allSpaces().contains(where: { $0.id == spaceID && $0.isCurrent }) { return }
     }
-    logState("before-desktop-click", targetSpaceID: spaceID, context: context)
-    hooks.clickDesktop(spaceID)
-    hooks.sleep(0.5)
-    logState("after-desktop-click", targetSpaceID: spaceID, context: context)
+    throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID)
   }
 
   private func waitForLaunchedWindowPlacement(
@@ -581,10 +587,13 @@ public struct LauncherData {
 }
 
 public enum WorkspaceRestorerError: Error, LocalizedError {
+  case targetSpaceFocusFailed(spaceID: UInt64)
   case windowRelocationFailed(windowID: Int, targetSpaceID: UInt64)
 
   public var errorDescription: String? {
     switch self {
+    case .targetSpaceFocusFailed(let spaceID):
+      return "Could not safely focus workspace Space \(spaceID)"
     case .windowRelocationFailed(let windowID, let targetSpaceID):
       return "Failed to move window \(windowID) to Space \(targetSpaceID)"
     }

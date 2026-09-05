@@ -2000,14 +2000,32 @@ public class SpaceManager {
 
   // MARK: - Display Focus
 
-  /// Clicks on the desktop of the display containing the given space to
-  /// transfer keyboard focus to that display. This ensures Launch Services
-  /// opens new apps on the correct display.
-  public func clickDesktopOnDisplay(forSpaceID spaceID: UInt64) {
+  /// Establishes display focus without clicking through an application window.
+  /// Single-display restores need no extra focus action after switching Spaces.
+  public func focusDisplayForWorkspace(spaceID: UInt64) throws {
     let allSpaces = getAllSpaces()
+    let displayCount = Set(allSpaces.map(\.displayUUID)).count
+    guard displayCount > 1 else { return }
+    let focusedSpaces =
+      WindowResizer.focusedWindowID().map {
+        dataSource.fetchSpacesForWindow(Int($0.windowID))
+      } ?? []
+    guard
+      Self.workspaceDisplayNeedsFocus(
+        displayCount: displayCount,
+        focusedWindowSpaceIDs: focusedSpaces, targetSpaceID: spaceID)
+    else { return }
+
+    // Activate an actual workspace window rather than clicking an arbitrary point
+    // inside it. The restorer verifies Space membership again after focus settles.
+    if let window = getAllWindows().first(where: { $0.spaceIDs == [spaceID] }) {
+      try activateWindow(id: window.id)
+      return
+    }
+
     guard let space = allSpaces.first(where: { $0.id == spaceID }),
       let screenNumber = Self.displayIDForUUID(space.displayUUID)
-    else { return }
+    else { throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID) }
 
     // Find the NSScreen matching this display
     guard
@@ -2016,16 +2034,52 @@ public class SpaceManager {
         return (desc[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID)
           == screenNumber
       })
-    else { return }
+    else { throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID) }
 
-    // Convert screen center to CGEvent coordinates (top-left origin)
+    // Only an exposed desktop point is safe. Ignore our own click-through overlay
+    // and desktop-layer windows, but count other visible windows as obstacles.
     let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
-    let center = CGPoint(
-      x: screen.frame.midX,
-      y: primaryHeight - screen.frame.midY
-    )
+    let visible = screen.visibleFrame
+    let frame = CGRect(
+      x: visible.minX, y: primaryHeight - visible.maxY,
+      width: visible.width, height: visible.height)
+    var obstacles: [CGRect] = []
+    for entry in dataSource.fetchOnScreenWindowList() {
+      if (entry[kCGWindowOwnerPID as String] as? Int)
+        == Int(ProcessInfo.processInfo.processIdentifier)
+      {
+        continue
+      }
+      if let layer = entry[kCGWindowLayer as String] as? Int, layer < 0 { continue }
+      guard let bounds = Self.windowBounds(in: entry) else {
+        throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID)
+      }
+      obstacles.append(bounds)
+    }
+    guard let point = Self.workspaceDesktopFocusPoint(in: frame, occupiedBounds: obstacles) else {
+      throw WorkspaceRestorerError.targetSpaceFocusFailed(spaceID: spaceID)
+    }
+    Self.postMouseClick(at: point)
+  }
 
-    SpaceManager.postMouseClick(at: center)
+  static func workspaceDisplayNeedsFocus(
+    displayCount: Int, focusedWindowSpaceIDs: [UInt64], targetSpaceID: UInt64
+  ) -> Bool {
+    displayCount > 1 && focusedWindowSpaceIDs != [targetSpaceID]
+  }
+
+  static func workspaceDesktopFocusPoint(in frame: CGRect, occupiedBounds: [CGRect]) -> CGPoint? {
+    let inset = frame.insetBy(dx: 12, dy: 12)
+    guard inset.width > 0, inset.height > 0 else { return nil }
+    for y in [inset.minY, inset.maxY, inset.midY] {
+      for x in [inset.minX, inset.maxX, inset.midX] {
+        let point = CGPoint(x: x, y: y)
+        if !occupiedBounds.contains(where: { $0.insetBy(dx: -2, dy: -2).contains(point) }) {
+          return point
+        }
+      }
+    }
+    return nil
   }
 
   /// Posts a click (mouseDown + mouseUp) at the given point.
